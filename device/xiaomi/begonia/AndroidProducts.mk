@@ -8,6 +8,5 @@ PRODUCT_MAKEFILES := \
     $(LOCAL_DIR)/twrp_begonia.mk
 
 COMMON_LUNCH_CHOICES := \
-    twrp_begonia-bp2a-eng \
     twrp_begonia-eng \
     twrp_begonia-userdebug
