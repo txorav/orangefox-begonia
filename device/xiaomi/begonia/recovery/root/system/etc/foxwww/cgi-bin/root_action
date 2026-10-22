@@ -1,0 +1,51 @@
+#!/system/bin/sh
+. /system/etc/foxwww/cgi-bin/lib.sh
+
+require_post
+require_token
+json_header
+
+read_body
+action=$(body_param action)
+id=$(body_param id)
+state=$(body_param state)
+
+if [ ! -x /system/bin/rootmanager ]; then
+    json_error "500 Internal Server Error" "rootmanager executable missing"
+fi
+
+case "$action" in
+    enable)
+        if [ -z "$id" ]; then
+            json_error "400 Bad Request" "missing module id"
+        fi
+        /system/bin/rootmanager enable "$id" >/dev/null 2>&1
+        printf '{"ok":true,"action":"enable","id":"%s"}\n' "$(json_escape "$id")"
+        ;;
+    disable)
+        if [ -z "$id" ]; then
+            json_error "400 Bad Request" "missing module id"
+        fi
+        /system/bin/rootmanager disable "$id" >/dev/null 2>&1
+        printf '{"ok":true,"action":"disable","id":"%s"}\n' "$(json_escape "$id")"
+        ;;
+    remove)
+        if [ -z "$id" ]; then
+            json_error "400 Bad Request" "missing module id"
+        fi
+        /system/bin/rootmanager remove "$id" >/dev/null 2>&1
+        printf '{"ok":true,"action":"remove","id":"%s"}\n' "$(json_escape "$id")"
+        ;;
+    safemode)
+        if [ "$state" = "on" ] || [ "$state" = "enable" ]; then
+            /system/bin/rootmanager safemode on >/dev/null 2>&1
+            printf '{"ok":true,"safemode":"enabled"}\n'
+        else
+            /system/bin/rootmanager safemode off >/dev/null 2>&1
+            printf '{"ok":true,"safemode":"disabled"}\n'
+        fi
+        ;;
+    *)
+        json_error "400 Bad Request" "unknown action: $action"
+        ;;
+esac

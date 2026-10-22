@@ -1,0 +1,10 @@
+#!/system/bin/sh
+. /system/etc/foxwww/cgi-bin/lib.sh
+
+json_header
+
+if [ -x /system/bin/rootmanager ]; then
+    /system/bin/rootmanager json 2>/dev/null
+else
+    printf '{"status":"error","message":"rootmanager not installed","modules":[]}\n'
+fi

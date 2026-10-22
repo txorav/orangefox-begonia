@@ -1,0 +1,43 @@
+#!/system/bin/sh
+. /system/etc/foxwww/cgi-bin/lib.sh
+
+if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    require_token
+    json_header
+    read_body
+    action=$(body_param action)
+    id=$(body_param id)
+
+    if [ ! -x /system/bin/recmod ]; then
+        json_error "500 Internal Server Error" "recmod binary missing"
+    fi
+
+    case "$action" in
+        load)
+            [ -z "$id" ] && json_error "400 Bad Request" "missing module id"
+            /system/bin/recmod load "$id" >/dev/null 2>&1
+            printf '{"ok":true,"action":"load","id":"%s"}\n' "$(json_escape "$id")"
+            ;;
+        unload)
+            [ -z "$id" ] && json_error "400 Bad Request" "missing module id"
+            /system/bin/recmod unload "$id" >/dev/null 2>&1
+            printf '{"ok":true,"action":"unload","id":"%s"}\n' "$(json_escape "$id")"
+            ;;
+        status)
+            [ -z "$id" ] && json_error "400 Bad Request" "missing module id"
+            telemetry=$(/system/bin/recmod status "$id" 2>/dev/null)
+            printf '{"ok":true,"action":"status","id":"%s","telemetry":"%s"}\n' \
+                "$(json_escape "$id")" "$(json_escape "$telemetry")"
+            ;;
+        *)
+            json_error "400 Bad Request" "unknown action: $action"
+            ;;
+    esac
+else
+    json_header
+    if [ -x /system/bin/recmod ]; then
+        /system/bin/recmod json 2>/dev/null
+    else
+        printf '{"status":"error","message":"recmod not installed","modules":[]}\n'
+    fi
+fi

@@ -943,7 +943,171 @@
     }
   });
 
+  async function loadRootModules() {
+    try {
+      const data = await api('/cgi-bin/root_modules');
+      if (!data) return;
+      const list = $('#rootModList');
+      const stateEl = $('#rootState');
+      const mgrName = $('#rootMgrName');
+      const mgrsEl = $('#rootMgrs');
+      const safeEl = $('#safeModeState');
+      const countEl = $('#rootModCount');
+
+      if (data.managers && data.managers.length > 0) {
+        mgrName.textContent = data.managers.join(' / ');
+        mgrsEl.textContent = data.managers.join(', ');
+      } else {
+        mgrName.textContent = 'None detected';
+        mgrsEl.textContent = 'None';
+      }
+
+      const isSafe = data.safe_mode === 'enabled';
+      safeEl.textContent = isSafe ? 'ACTIVE' : 'Disabled';
+      safeEl.style.color = isSafe ? 'var(--bad)' : 'var(--good)';
+
+      const modules = data.modules || [];
+      countEl.textContent = modules.length;
+
+      if (modules.length === 0) {
+        stateEl.textContent = 'No root modules found. Make sure /data is decrypted.';
+        list.innerHTML = '';
+        return;
+      }
+
+      stateEl.textContent = `Found ${modules.length} installed module(s).`;
+      list.innerHTML = modules.map(m => `
+        <li style="display:flex; justify-content:space-between; align-items:center; padding:12px 14px; margin-bottom:8px; background:var(--card-hi); border-radius:12px; border:1px solid var(--line);">
+          <div style="flex:1;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <strong>${m.name}</strong>
+              <span style="font-size:0.75rem; color:var(--muted);">v${m.version} by ${m.author}</span>
+              <span class="pill ${m.status === 'enabled' ? 'good' : m.status === 'disabled' ? 'warn' : 'bad'}" style="padding:2px 8px; font-size:0.7rem;">${m.status.toUpperCase()}</span>
+            </div>
+            <div style="font-size:0.8rem; color:var(--muted); margin-top:4px;">${m.description || m.id}</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="ghost small btn-toggle-mod" data-id="${m.id}" data-action="${m.status === 'enabled' ? 'disable' : 'enable'}">${m.status === 'enabled' ? 'Disable' : 'Enable'}</button>
+            <button class="ghost small danger btn-rm-mod" data-id="${m.id}">Remove</button>
+          </div>
+        </li>
+      `).join('');
+
+      list.querySelectorAll('.btn-toggle-mod').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          busy(btn, true, 'Updating');
+          try {
+            await api('/cgi-bin/root_action', {
+              method: 'POST',
+              body: new URLSearchParams({ action: btn.dataset.action, id: btn.dataset.id })
+            });
+            toast(`Module ${btn.dataset.id} updated`, 'good');
+            await loadRootModules();
+          } catch(e) {
+            toast(e.message, 'bad');
+          } finally {
+            busy(btn, false);
+          }
+        });
+      });
+
+      list.querySelectorAll('.btn-rm-mod').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!window.confirm(`Remove module ${btn.dataset.id}?`)) return;
+          busy(btn, true, 'Removing');
+          try {
+            await api('/cgi-bin/root_action', {
+              method: 'POST',
+              body: new URLSearchParams({ action: 'remove', id: btn.dataset.id })
+            });
+            toast(`Module ${btn.dataset.id} scheduled for removal`, 'warn');
+            await loadRootModules();
+          } catch(e) {
+            toast(e.message, 'bad');
+          } finally {
+            busy(btn, false);
+          }
+        });
+      });
+    } catch(err) {
+      $('#rootState').textContent = 'Unable to query root modules (requires decryption).';
+    }
+  }
+
+  async function loadRecmod() {
+    try {
+      const data = await api('/cgi-bin/recmod');
+      if (!data) return;
+      const list = $('#recmodList');
+      const countEl = $('#recmodActiveCount');
+      const mods = data.modules || [];
+
+      countEl.textContent = `${data.active_count || 0} Active in RAM`;
+      if (mods.length === 0) {
+        list.innerHTML = '<li class="muted small">No in-RAM runtime modules discovered.</li>';
+        return;
+      }
+
+      list.innerHTML = mods.map(m => `
+        <li style="display:flex; flex-direction:column; padding:12px 14px; margin-bottom:8px; background:var(--card-hi); border-radius:12px; border:1px solid var(--line);">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <strong>${m.name}</strong>
+                <span style="font-size:0.75rem; color:var(--muted);">${m.category} &middot; v${m.version}</span>
+                <span class="pill ${m.loaded ? 'good' : 'off'}" style="padding:2px 8px; font-size:0.7rem;">${m.loaded ? 'LOADED IN RAM' : 'STANDBY'}</span>
+              </div>
+              <div style="font-size:0.8rem; color:var(--muted); margin-top:4px;">${m.description}</div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="ghost small btn-recmod-action" data-id="${m.id}" data-action="${m.loaded ? 'unload' : 'load'}">${m.loaded ? 'Unload RAM' : 'Load in RAM'}</button>
+            </div>
+          </div>
+          ${m.telemetry ? `<pre style="margin-top:8px; padding:8px; background:var(--bg); border-radius:8px; font-size:0.75rem; color:var(--text); white-space:pre-wrap;">${m.telemetry}</pre>` : ''}
+        </li>
+      `).join('');
+
+      list.querySelectorAll('.btn-recmod-action').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          busy(btn, true, 'Working');
+          try {
+            await api('/cgi-bin/recmod', {
+              method: 'POST',
+              body: new URLSearchParams({ action: btn.dataset.action, id: btn.dataset.id })
+            });
+            toast(`Module ${btn.dataset.id} ${btn.dataset.action}ed in RAM`, 'good');
+            await loadRecmod();
+          } catch(e) {
+            toast(e.message, 'bad');
+          } finally {
+            busy(btn, false);
+          }
+        });
+      });
+    } catch(err) {
+      $('#recmodList').innerHTML = '<li class="muted small">Failed to load in-RAM modules.</li>';
+    }
+  }
+
+  $('#btnRootRefresh')?.addEventListener('click', () => loadRootModules());
+  $('#btnRecmodRefresh')?.addEventListener('click', () => loadRecmod());
+  $('#btnToggleSafeMode')?.addEventListener('click', async () => {
+    const isSafe = $('#safeModeState').textContent === 'ACTIVE';
+    try {
+      await api('/cgi-bin/root_action', {
+        method: 'POST',
+        body: new URLSearchParams({ action: 'safemode', state: isSafe ? 'off' : 'on' })
+      });
+      toast(`Safe Mode ${isSafe ? 'disabled' : 'enabled'}`, 'good');
+      await loadRootModules();
+    } catch(e) {
+      toast(e.message, 'bad');
+    }
+  });
+
   renderWebQr();
+  loadRootModules();
+  loadRecmod();
   if (token.get()) {
     loadFiles(state.files.path).catch(() => { /* the file card shows the error */ });
   } else {

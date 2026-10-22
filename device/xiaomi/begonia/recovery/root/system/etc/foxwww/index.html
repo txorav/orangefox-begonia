@@ -151,6 +151,44 @@
     </p>
   </section>
 
+  <section class="card" id="rootCard">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Root &amp; System</p>
+        <h2>Root Modules Manager</h2>
+      </div>
+      <div class="actions">
+        <span id="rootPill" class="pill good"><span class="dot"></span><span id="rootMgrName">Scanning&hellip;</span></span>
+        <button id="btnRootRefresh" class="ghost small">Refresh</button>
+      </div>
+    </div>
+    <div class="metrics">
+      <div><span>Safe Mode</span><strong id="safeModeState">Disabled</strong></div>
+      <div><span>Active Modules</span><strong id="rootModCount">0</strong></div>
+      <div><span>Installed Managers</span><strong id="rootMgrs">None</strong></div>
+    </div>
+    <div class="actions" style="margin-top:12px;">
+      <button id="btnToggleSafeMode" class="ghost small warn">Toggle Safe Mode</button>
+    </div>
+    <p id="rootState" class="muted small">Checking /data/adb for installed Magisk, KernelSU, KSUN, APatch, FolkPatch, and SukiSU modules&hellip;</p>
+    <ul id="rootModList" class="networks" style="margin-top:14px;"></ul>
+  </section>
+
+  <section class="card" id="recmodCard">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Modular Architecture</p>
+        <h2>In-RAM Drivers &amp; Runtime Modules</h2>
+      </div>
+      <div class="actions">
+        <span id="recmodPill" class="pill good"><span class="dot"></span><span id="recmodActiveCount">0 Active in RAM</span></span>
+        <button id="btnRecmodRefresh" class="ghost small">Refresh</button>
+      </div>
+    </div>
+    <p class="muted small">Dynamically loads hardware stacks (SIM/RIL baseband, IMEI decoders, Wi-Fi, sensors, storage tools) into RAM during recovery without modifying system or vendor partitions.</p>
+    <ul id="recmodList" class="networks" style="margin-top:14px;"></ul>
+  </section>
+
   <section class="card">
     <div class="section-head">
       <div>

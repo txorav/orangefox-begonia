@@ -1,0 +1,432 @@
+#!/system/bin/sh
+#
+# rootmanager - Universal Root Solution & Module Manager for Android Recoveries
+#
+# Supports:
+#   - Magisk
+#   - KernelSU & KernelSU Next (KSUN)
+#   - APatch & FolkPatch
+#   - SukiSU
+#
+# Features:
+#   - Discovers installed root managers on device (/data/adb)
+#   - Discovers all installed modules across all managers
+#   - Displays module ID, Name, Version, Author, Status, Description
+#   - Enable / Disable modules (non-destructive)
+#   - Remove modules (schedule removal on next boot or force instant delete)
+#   - Global Safe Mode toggling (.disable_magisk, .disable_ksu, .disable_apatch)
+#   - JSON output mode for Web UI / REST APIs
+#   - Interactive on-screen recovery terminal menu with ANSI colors
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+ADB_DIR="/data/adb"
+DATA_DIR="/data"
+
+# Ensure /data is mounted if available
+ensure_data_mounted() {
+    if [ ! -d "$ADB_DIR" ]; then
+        if mountpoint -q /data 2>/dev/null; then
+            return 0
+        fi
+        # Try mounting userdata
+        mount /data 2>/dev/null || true
+    fi
+}
+
+# Color codes for terminal UI
+BOLD="\033[1m"
+GREEN="\033[32m"
+RED="\033[31m"
+YELLOW="\033[33m"
+CYAN="\033[36m"
+MAGENTA="\033[35m"
+RESET="\033[0m"
+
+# Get root manager detection summary
+detect_root_managers() {
+    ensure_data_mounted
+    local found=0
+
+    # Magisk
+    if [ -f "$ADB_DIR/magisk/magisk" ] || [ -f "$ADB_DIR/magisk.db" ] || [ -d "$ADB_DIR/modules" -a -f "$ADB_DIR/magisk_version" ]; then
+        echo "magisk"
+        found=1
+    elif [ -d "$ADB_DIR/modules" ] && [ ! -d "$ADB_DIR/ksu" ] && [ ! -d "$ADB_DIR/ap" ]; then
+        echo "magisk"
+        found=1
+    fi
+
+    # KernelSU / KernelSU Next
+    if [ -d "$ADB_DIR/ksu" ] || [ -d "$ADB_DIR/ksun" ] || [ -f "$ADB_DIR/ksud" ]; then
+        if [ -d "$ADB_DIR/ksun" ]; then
+            echo "ksun"
+        else
+            echo "kernelsu"
+        fi
+        found=1
+    fi
+
+    # APatch / FolkPatch
+    if [ -d "$ADB_DIR/ap" ] || [ -f "$ADB_DIR/apd" ]; then
+        if [ -f "$ADB_DIR/ap/folkpatch" ] || grep -qi "folk" "$ADB_DIR/ap/"* 2>/dev/null; then
+            echo "folkpatch"
+        else
+            echo "apatch"
+        fi
+        found=1
+    fi
+
+    # SukiSU
+    if [ -d "$ADB_DIR/sukisu" ] || [ -f "$ADB_DIR/sukisud" ]; then
+        echo "sukisu"
+        found=1
+    fi
+
+    if [ "$found" -eq 0 ]; then
+        echo "none"
+    fi
+}
+
+# Find all module base directories
+get_module_dirs() {
+    ensure_data_mounted
+    local dirs=""
+    [ -d "$ADB_DIR/modules" ] && dirs="$dirs $ADB_DIR/modules"
+    [ -d "$ADB_DIR/ksu/modules" ] && dirs="$dirs $ADB_DIR/ksu/modules"
+    [ -d "$ADB_DIR/ksun/modules" ] && dirs="$dirs $ADB_DIR/ksun/modules"
+    [ -d "$ADB_DIR/ap/modules" ] && dirs="$dirs $ADB_DIR/ap/modules"
+    [ -d "$ADB_DIR/sukisu/modules" ] && dirs="$dirs $ADB_DIR/sukisu/modules"
+    echo "$dirs"
+}
+
+# Parse prop from module.prop
+get_prop() {
+    local prop_file="$1"
+    local prop_name="$2"
+    if [ -f "$prop_file" ]; then
+        grep -E "^${prop_name}=" "$prop_file" 2>/dev/null | cut -d= -f2- | sed 's/\r//' | head -n 1
+    fi
+}
+
+# Check safe mode state across managers
+get_safemode_state() {
+    ensure_data_mounted
+    if [ -f "$ADB_DIR/.disable_magisk" ] || [ -f "$ADB_DIR/modules/.disable_magisk" ] || \
+       [ -f "$DATA_DIR/cache/.disable_magisk" ] || [ -f "/cache/.disable_magisk" ] || \
+       [ -f "$ADB_DIR/ksu/.disable_ksu" ] || [ -f "$ADB_DIR/ap/.disable_apatch" ]; then
+        echo "enabled"
+    else
+        echo "disabled"
+    fi
+}
+
+# Set global safe mode
+set_safemode() {
+    ensure_data_mounted
+    local target="$1"
+    if [ "$target" = "on" ] || [ "$target" = "enable" ] || [ "$target" = "1" ]; then
+        mkdir -p "$ADB_DIR" 2>/dev/null
+        touch "$ADB_DIR/.disable_magisk" 2>/dev/null || true
+        touch "$ADB_DIR/modules/.disable_magisk" 2>/dev/null || true
+        [ -d "$ADB_DIR/ksu" ] && touch "$ADB_DIR/ksu/.disable_ksu" 2>/dev/null || true
+        [ -d "$ADB_DIR/ap" ] && touch "$ADB_DIR/ap/.disable_apatch" 2>/dev/null || true
+        echo "Global Safe Mode has been ENABLED (all modules will be skipped on boot)"
+    else
+        rm -f "$ADB_DIR/.disable_magisk" \
+              "$ADB_DIR/modules/.disable_magisk" \
+              "$DATA_DIR/cache/.disable_magisk" \
+              "/cache/.disable_magisk" \
+              "$ADB_DIR/ksu/.disable_ksu" \
+              "$ADB_DIR/ap/.disable_apatch" 2>/dev/null || true
+        echo "Global Safe Mode has been DISABLED"
+    fi
+}
+
+# Locate a module directory by ID
+find_module_path() {
+    local target_id="$1"
+    for base in $(get_module_dirs); do
+        if [ -d "$base/$target_id" ]; then
+            echo "$base/$target_id"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# List all modules
+list_modules() {
+    ensure_data_mounted
+    local mod_dirs
+    mod_dirs=$(get_module_dirs)
+
+    if [ -z "$mod_dirs" ]; then
+        echo -e "${YELLOW}No module directories found in /data/adb. Make sure /data is decrypted and mounted.${RESET}"
+        return 1
+    fi
+
+    echo -e "${BOLD}======================================================================${RESET}"
+    echo -e "${CYAN}${BOLD}       UNIVERSAL ROOT MANAGER & MODULE DASHBOARD                      ${RESET}"
+    echo -e "${BOLD}======================================================================${RESET}"
+    
+    local managers
+    managers=$(detect_root_managers | tr '\n' ' ')
+    local safemode
+    safemode=$(get_safemode_state)
+    
+    echo -e "${BOLD}Detected Root Solution(s) :${RESET} ${GREEN}${managers}${RESET}"
+    if [ "$safemode" = "enabled" ]; then
+        echo -e "${BOLD}Global Safe Mode          :${RESET} ${RED}${BOLD}ACTIVE (All modules disabled)${RESET}"
+    else
+        echo -e "${BOLD}Global Safe Mode          :${RESET} ${GREEN}INACTIVE (Normal boot)${RESET}"
+    fi
+    echo ""
+
+    local count=0
+    for base in $mod_dirs; do
+        for mod in "$base"/*; do
+            [ -d "$mod" ] || continue
+            local id
+            id=$(basename "$mod")
+            [ "$id" = "." -o "$id" = ".." ] && continue
+
+            local prop="$mod/module.prop"
+            local name
+            local ver
+            local author
+            local desc
+            if [ -f "$prop" ]; then
+                name=$(get_prop "$prop" "name")
+                ver=$(get_prop "$prop" "version")
+                author=$(get_prop "$prop" "author")
+                desc=$(get_prop "$prop" "description")
+            else
+                name="$id"
+                ver="unknown"
+                author="unknown"
+                desc="No module.prop found"
+            fi
+            [ -z "$name" ] && name="$id"
+
+            local status
+            local status_color
+            if [ -f "$mod/remove" ]; then
+                status="REMOVAL PENDING"
+                status_color="${RED}"
+            elif [ -f "$mod/disable" ]; then
+                status="DISABLED"
+                status_color="${YELLOW}"
+            else
+                status="ENABLED"
+                status_color="${GREEN}"
+            fi
+
+            count=$((count + 1))
+            echo -e "${BOLD}[$count] ${CYAN}${name}${RESET} (${id})"
+            echo -e "    ${BOLD}Version :${RESET} ${ver}  |  ${BOLD}Author :${RESET} ${author}"
+            echo -e "    ${BOLD}Status  :${RESET} ${status_color}${BOLD}${status}${RESET}"
+            echo -e "    ${BOLD}Path    :${RESET} ${mod}"
+            [ -n "$desc" ] && echo -e "    ${BOLD}Details :${RESET} ${desc}"
+            echo -e "${BOLD}----------------------------------------------------------------------${RESET}"
+        done
+    done
+
+    if [ "$count" -eq 0 ]; then
+        echo -e "${YELLOW}No modules currently installed in /data/adb.${RESET}"
+    fi
+}
+
+# Output modules as JSON
+json_output() {
+    ensure_data_mounted
+    local managers
+    managers=$(detect_root_managers | tr '\n' ',' | sed 's/,$//')
+    local safemode
+    safemode=$(get_safemode_state)
+
+    printf '{"status":"ok","managers":[%s],"safe_mode":"%s","modules":[' \
+        "$(for m in $(detect_root_managers); do printf '"%s",' "$m"; done | sed 's/,$//')" \
+        "$safemode"
+
+    local first=1
+    for base in $(get_module_dirs); do
+        for mod in "$base"/*; do
+            [ -d "$mod" ] || continue
+            local id
+            id=$(basename "$mod")
+            local prop="$mod/module.prop"
+            local name ver author desc
+            if [ -f "$prop" ]; then
+                name=$(get_prop "$prop" "name" | sed 's/"/\\"/g')
+                ver=$(get_prop "$prop" "version" | sed 's/"/\\"/g')
+                author=$(get_prop "$prop" "author" | sed 's/"/\\"/g')
+                desc=$(get_prop "$prop" "description" | sed 's/"/\\"/g')
+            else
+                name="$id"
+                ver="1.0"
+                author="Unknown"
+                desc=""
+            fi
+            [ -z "$name" ] && name="$id"
+
+            local status="enabled"
+            if [ -f "$mod/remove" ]; then
+                status="remove_pending"
+            elif [ -f "$mod/disable" ]; then
+                status="disabled"
+            fi
+
+            [ "$first" -eq 0 ] && printf ','
+            first=0
+            printf '{"id":"%s","name":"%s","version":"%s","author":"%s","description":"%s","status":"%s","path":"%s"}' \
+                "$id" "$name" "$ver" "$author" "$desc" "$status" "$mod"
+        done
+    done
+    printf ']}\n'
+}
+
+# Enable a module
+enable_module() {
+    local id="$1"
+    [ -z "$id" ] && { echo "Error: Module ID required. Usage: rootmanager enable <id>"; return 1; }
+    local path
+    path=$(find_module_path "$id")
+    if [ -n "$path" ]; then
+        rm -f "$path/disable" "$path/remove" 2>/dev/null || true
+        echo -e "${GREEN}Module '${id}' has been ENABLED.${RESET}"
+    else
+        echo -e "${RED}Error: Module '${id}' not found.${RESET}"
+        return 1
+    fi
+}
+
+# Disable a module
+disable_module() {
+    local id="$1"
+    [ -z "$id" ] && { echo "Error: Module ID required. Usage: rootmanager disable <id>"; return 1; }
+    local path
+    path=$(find_module_path "$id")
+    if [ -n "$path" ]; then
+        touch "$path/disable" 2>/dev/null || true
+        echo -e "${YELLOW}Module '${id}' has been DISABLED.${RESET}"
+    else
+        echo -e "${RED}Error: Module '${id}' not found.${RESET}"
+        return 1
+    fi
+}
+
+# Remove a module
+remove_module() {
+    local id="$1"
+    local force="$2"
+    [ -z "$id" ] && { echo "Error: Module ID required. Usage: rootmanager remove <id> [--force]"; return 1; }
+    local path
+    path=$(find_module_path "$id")
+    if [ -n "$path" ]; then
+        if [ "$force" = "--force" ] || [ "$force" = "-f" ]; then
+            rm -rf "$path"
+            echo -e "${RED}Module '${id}' has been PERMANENTLY REMOVED.${RESET}"
+        else
+            touch "$path/remove"
+            echo -e "${YELLOW}Module '${id}' marked for REMOVAL on next boot. (Use --force for instant delete)${RESET}"
+        fi
+    else
+        echo -e "${RED}Error: Module '${id}' not found.${RESET}"
+        return 1
+    fi
+}
+
+# Interactive recovery terminal menu
+interactive_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        list_modules
+        echo ""
+        echo -e "${BOLD}Commands:${RESET}"
+        echo -e "  [e <id>]   Enable module"
+        echo -e "  [d <id>]   Disable module"
+        echo -e "  [r <id>]   Remove module"
+        echo -e "  [s on|off] Toggle Safe Mode"
+        echo -e "  [q]        Quit menu"
+        echo ""
+        printf "${BOLD}rootmanager > ${RESET}"
+        read -r cmd arg extra || break
+        case "$cmd" in
+            e|enable)
+                enable_module "$arg"
+                sleep 2
+                ;;
+            d|disable)
+                disable_module "$arg"
+                sleep 2
+                ;;
+            r|remove)
+                remove_module "$arg" "$extra"
+                sleep 2
+                ;;
+            s|safemode)
+                set_safemode "$arg"
+                sleep 2
+                ;;
+            q|quit|exit)
+                break
+                ;;
+            *)
+                echo "Unknown command: $cmd"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+case "$1" in
+    list|ls)
+        list_modules
+        ;;
+    json)
+        json_output
+        ;;
+    enable)
+        shift
+        enable_module "$@"
+        ;;
+    disable)
+        shift
+        disable_module "$@"
+        ;;
+    remove|rm)
+        shift
+        remove_module "$@"
+        ;;
+    safemode)
+        if [ -n "$2" ]; then
+            set_safemode "$2"
+        else
+            echo "Safe Mode is: $(get_safemode_state)"
+        fi
+        ;;
+    detect)
+        detect_root_managers
+        ;;
+    menu|interactive|"")
+        interactive_menu
+        ;;
+    *)
+        cat <<EOF
+Usage: rootmanager <command> [args]
+
+Commands:
+  list              List all installed modules across all root managers
+  json              Export installed modules and root manager status as JSON
+  enable <id>       Enable a specific module
+  disable <id>      Disable a specific module
+  remove <id> [-f]  Schedule removal (or force immediate delete with -f)
+  safemode [on|off] Check or toggle global Safe Mode
+  detect            Show detected root managers on device
+  menu              Launch interactive recovery terminal menu
+EOF
+        ;;
+esac

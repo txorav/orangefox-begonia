@@ -1,8 +1,8 @@
 aosp/
 out/
 .ccache/
-fox-sync/
 *.img
+!device/xiaomi/begonia/prebuilt/*.img
 *.zip
 *.log
 .repo/

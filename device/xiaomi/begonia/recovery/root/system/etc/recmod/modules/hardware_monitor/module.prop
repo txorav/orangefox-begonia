@@ -1,0 +1,7 @@
+id=hardware_monitor
+name=Helio G90T Hardware & Battery Telemetry
+version=1.0.0
+versionCode=10
+author=Begonia Recovery Engineering
+description=Live CPU, GPU, Battery voltage, charging current, thermal zones, and MT6785 fuel gauge reader
+category=hardware

@@ -1,0 +1,7 @@
+id=sim_imei_modem
+name=MediaTek SIM & IMEI Baseband Stack
+version=1.3.0
+versionCode=13
+author=Begonia Recovery Engineering
+description=Initializes MT6785 CCCI baseband, mounts NVRAM/NVDATA, extracts IMEI 1 & 2 in RAM, and enables SIM slot detection
+category=telephony

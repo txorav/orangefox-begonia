@@ -1,0 +1,375 @@
+#!/system/bin/sh
+#
+# recmod - Modular In-RAM Runtime Architecture & Driver Extension Engine
+#
+# Allows loading, managing, and running dynamic kernel drivers and hardware
+# stacks (SIM/RIL/IMEI baseband, Wi-Fi, sensors, storage tools) entirely in
+# RAM during recovery runtime, with unified status telemetry and UI hooks.
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+RECMOD_RUN_DIR="/tmp/recmod"
+RECMOD_ACTIVE_DIR="$RECMOD_RUN_DIR/active"
+RECMOD_LOG="$RECMOD_RUN_DIR/recmod.log"
+
+# Search locations for modules (prioritized)
+SEARCH_DIRS="
+/tmp/recovery/modules
+/system/etc/recmod/modules
+/sdcard/recovery/modules
+/external_sd/recovery/modules
+/usbstorage/recovery/modules
+"
+
+mkdir -p "$RECMOD_ACTIVE_DIR" 2>/dev/null
+
+log() {
+    echo "$(date '+%H:%M:%S') [recmod] $*" >> "$RECMOD_LOG" 2>/dev/null
+}
+
+# Color definitions
+BOLD="\033[1m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+CYAN="\033[36m"
+RED="\033[31m"
+MAGENTA="\033[35m"
+RESET="\033[0m"
+
+# Parse property from module.prop
+get_prop() {
+    local prop_file="$1"
+    local prop_name="$2"
+    if [ -f "$prop_file" ]; then
+        grep -E "^${prop_name}=" "$prop_file" 2>/dev/null | cut -d= -f2- | sed 's/\r//' | head -n 1
+    fi
+}
+
+# Find path for a given module ID
+find_module() {
+    local id="$1"
+    for dir in $SEARCH_DIRS; do
+        if [ -d "$dir/$id" ] && [ -f "$dir/$id/module.prop" ]; then
+            echo "$dir/$id"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Check if a module is currently loaded in RAM
+is_loaded() {
+    local id="$1"
+    [ -f "$RECMOD_ACTIVE_DIR/$id.loaded" ] && return 0
+    return 1
+}
+
+# List all discovered modules
+list_modules() {
+    echo -e "${BOLD}======================================================================${RESET}"
+    echo -e "${CYAN}${BOLD}       RECMOD: MODULAR IN-RAM DRIVER & EXTENSION ARCHITECTURE         ${RESET}"
+    echo -e "${BOLD}======================================================================${RESET}"
+    echo -e "${BOLD}Runtime Memory State:${RESET} Active in RAM (${RECMOD_ACTIVE_DIR})"
+    echo ""
+
+    local count=0
+    local seen_ids=""
+
+    for search_path in $SEARCH_DIRS; do
+        [ -d "$search_path" ] || continue
+        for mod in "$search_path"/*; do
+            [ -d "$mod" ] || continue
+            local prop="$mod/module.prop"
+            [ -f "$prop" ] || continue
+
+            local id
+            id=$(get_prop "$prop" "id")
+            [ -z "$id" ] && id=$(basename "$mod")
+
+            # Avoid duplicates if found in multiple search paths
+            case " $seen_ids " in
+                *" $id "*) continue ;;
+            esac
+            seen_ids="$seen_ids $id"
+
+            local name ver author desc cat
+            name=$(get_prop "$prop" "name")
+            ver=$(get_prop "$prop" "version")
+            author=$(get_prop "$prop" "author")
+            desc=$(get_prop "$prop" "description")
+            cat=$(get_prop "$prop" "category")
+            [ -z "$name" ] && name="$id"
+            [ -z "$cat" ] && cat="general"
+
+            local status status_color
+            if is_loaded "$id"; then
+                status="LOADED (RUNNING IN RAM)"
+                status_color="${GREEN}"
+            else
+                status="UNLOADED (AVAILABLE)"
+                status_color="${YELLOW}"
+            fi
+
+            count=$((count + 1))
+            echo -e "${BOLD}[$count] ${CYAN}${name}${RESET} [${cat}] (${id})"
+            echo -e "    ${BOLD}Version :${RESET} ${ver:-1.0}  |  ${BOLD}Author :${RESET} ${author:-Unified}"
+            echo -e "    ${BOLD}Status  :${RESET} ${status_color}${BOLD}${status}${RESET}"
+            echo -e "    ${BOLD}Source  :${RESET} ${mod}"
+            [ -n "$desc" ] && echo -e "    ${BOLD}Info    :${RESET} ${desc}"
+            echo -e "${BOLD}----------------------------------------------------------------------${RESET}"
+        done
+    done
+
+    if [ "$count" -eq 0 ]; then
+        echo -e "${YELLOW}No modules discovered in search paths.${RESET}"
+    fi
+}
+
+# Output modules and live telemetry as JSON
+json_output() {
+    local seen_ids=""
+    local first=1
+
+    printf '{"status":"ok","active_count":%d,"modules":[' \
+        "$(ls -1 "$RECMOD_ACTIVE_DIR"/*.loaded 2>/dev/null | wc -l)"
+
+    for search_path in $SEARCH_DIRS; do
+        [ -d "$search_path" ] || continue
+        for mod in "$search_path"/*; do
+            [ -d "$mod" ] || continue
+            local prop="$mod/module.prop"
+            [ -f "$prop" ] || continue
+
+            local id
+            id=$(get_prop "$prop" "id")
+            [ -z "$id" ] && id=$(basename "$mod")
+
+            case " $seen_ids " in
+                *" $id "*) continue ;;
+            esac
+            seen_ids="$seen_ids $id"
+
+            local name ver author desc cat
+            name=$(get_prop "$prop" "name" | sed 's/"/\\"/g')
+            ver=$(get_prop "$prop" "version" | sed 's/"/\\"/g')
+            author=$(get_prop "$prop" "author" | sed 's/"/\\"/g')
+            desc=$(get_prop "$prop" "description" | sed 's/"/\\"/g')
+            cat=$(get_prop "$prop" "category" | sed 's/"/\\"/g')
+            [ -z "$name" ] && name="$id"
+
+            local loaded="false"
+            is_loaded "$id" && loaded="true"
+
+            local telemetry=""
+            if [ -x "$mod/status.sh" ]; then
+                telemetry=$("$mod/status.sh" 2>/dev/null | tr '\n' ' ' | sed 's/"/\\"/g')
+            fi
+
+            [ "$first" -eq 0 ] && printf ','
+            first=0
+            printf '{"id":"%s","name":"%s","version":"%s","author":"%s","category":"%s","description":"%s","loaded":%s,"telemetry":"%s","path":"%s"}' \
+                "$id" "$name" "$ver" "$author" "$cat" "$desc" "$loaded" "$telemetry" "$mod"
+        done
+    done
+    printf ']}\n'
+}
+
+# Load a module into RAM runtime
+load_module() {
+    local id="$1"
+    [ -z "$id" ] && { echo "Error: Module ID required. Usage: recmod load <id>"; return 1; }
+
+    if is_loaded "$id"; then
+        echo -e "${YELLOW}Module '${id}' is already loaded in RAM.${RESET}"
+        return 0
+    fi
+
+    local mod_path
+    mod_path=$(find_module "$id")
+    if [ -z "$mod_path" ]; then
+        echo -e "${RED}Error: Module '${id}' not found in any module search path.${RESET}"
+        return 1
+    fi
+
+    echo -e "${BOLD}Loading module '${id}' into RAM from ${mod_path}...${RESET}"
+    log "loading module $id from $mod_path"
+
+    # Insert any bundled .ko kernel modules
+    if [ -d "$mod_path/drivers" ]; then
+        for ko in "$mod_path/drivers"/*.ko; do
+            [ -f "$ko" ] || continue
+            echo -e "  -> Inserting kernel driver: $(basename "$ko")"
+            insmod "$ko" 2>/dev/null || true
+        done
+    fi
+
+    # Execute load script
+    if [ -f "$mod_path/load.sh" ]; then
+        chmod 0755 "$mod_path/load.sh" 2>/dev/null
+        echo -e "  -> Executing runtime initialization..."
+        sh "$mod_path/load.sh"
+    fi
+
+    # Mark as active
+    echo "$mod_path" > "$RECMOD_ACTIVE_DIR/$id.loaded"
+    echo "$(date '+%s')" > "$RECMOD_ACTIVE_DIR/$id.timestamp"
+    echo -e "${GREEN}${BOLD}✓ Module '${id}' successfully loaded and running in RAM.${RESET}"
+    log "module $id loaded successfully"
+
+    # Query telemetry if available
+    if [ -x "$mod_path/status.sh" ]; then
+        echo ""
+        echo -e "${BOLD}Runtime Telemetry:${RESET}"
+        "$mod_path/status.sh"
+    fi
+}
+
+# Unload a module from RAM runtime
+unload_module() {
+    local id="$1"
+    [ -z "$id" ] && { echo "Error: Module ID required. Usage: recmod unload <id>"; return 1; }
+
+    if ! is_loaded "$id"; then
+        echo -e "${YELLOW}Module '${id}' is not currently loaded in RAM.${RESET}"
+        return 0
+    fi
+
+    local mod_path
+    mod_path=$(cat "$RECMOD_ACTIVE_DIR/$id.loaded" 2>/dev/null)
+    [ -z "$mod_path" ] && mod_path=$(find_module "$id")
+
+    echo -e "${BOLD}Unloading module '${id}' from RAM...${RESET}"
+    log "unloading module $id"
+
+    # Execute unload script
+    if [ -n "$mod_path" ] && [ -f "$mod_path/unload.sh" ]; then
+        chmod 0755 "$mod_path/unload.sh" 2>/dev/null
+        echo -e "  -> Executing runtime cleanup..."
+        sh "$mod_path/unload.sh"
+    fi
+
+    # Remove active flag
+    rm -f "$RECMOD_ACTIVE_DIR/$id.loaded" "$RECMOD_ACTIVE_DIR/$id.timestamp" 2>/dev/null || true
+    echo -e "${GREEN}${BOLD}✓ Module '${id}' unloaded and memory reclaimed.${RESET}"
+    log "module $id unloaded successfully"
+}
+
+# Query status / telemetry of modules
+status_module() {
+    local id="$1"
+    if [ -n "$id" ]; then
+        local mod_path
+        mod_path=$(find_module "$id")
+        if [ -z "$mod_path" ]; then
+            echo -e "${RED}Error: Module '${id}' not found.${RESET}"
+            return 1
+        fi
+        echo -e "${BOLD}Status for '${id}':${RESET}"
+        if is_loaded "$id"; then
+            echo -e "  State: ${GREEN}${BOLD}LOADED IN RAM${RESET}"
+        else
+            echo -e "  State: ${YELLOW}UNLOADED${RESET}"
+        fi
+        if [ -x "$mod_path/status.sh" ]; then
+            echo -e "  Telemetry:"
+            "$mod_path/status.sh" | sed 's/^/    /'
+        fi
+    else
+        echo -e "${BOLD}Active In-RAM Modules:${RESET}"
+        local active=0
+        for f in "$RECMOD_ACTIVE_DIR"/*.loaded; do
+            [ -f "$f" ] || continue
+            active=$((active + 1))
+            local mid
+            mid=$(basename "$f" .loaded)
+            local mpath
+            mpath=$(cat "$f")
+            echo -e "  • ${GREEN}${BOLD}${mid}${RESET} (${mpath})"
+            if [ -x "$mpath/status.sh" ]; then
+                "$mpath/status.sh" | sed 's/^/      /'
+            fi
+        done
+        [ "$active" -eq 0 ] && echo -e "  ${YELLOW}No modules currently loaded in RAM.${RESET}"
+    fi
+}
+
+# Interactive on-screen terminal menu
+interactive_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        list_modules
+        echo ""
+        echo -e "${BOLD}Active Status:${RESET}"
+        status_module
+        echo ""
+        echo -e "${BOLD}Commands:${RESET}"
+        echo -e "  [l <id>] Load module into RAM"
+        echo -e "  [u <id>] Unload module from RAM"
+        echo -e "  [s <id>] View module telemetry"
+        echo -e "  [q]      Quit menu"
+        echo ""
+        printf "${BOLD}recmod > ${RESET}"
+        read -r cmd arg || break
+        case "$cmd" in
+            l|load)
+                load_module "$arg"
+                sleep 2
+                ;;
+            u|unload)
+                unload_module "$arg"
+                sleep 2
+                ;;
+            s|status)
+                status_module "$arg"
+                echo "Press enter to continue..."
+                read -r _
+                ;;
+            q|quit|exit)
+                break
+                ;;
+            *)
+                echo "Unknown command: $cmd"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+case "$1" in
+    list|ls)
+        list_modules
+        ;;
+    json)
+        json_output
+        ;;
+    load)
+        shift
+        load_module "$@"
+        ;;
+    unload)
+        shift
+        unload_module "$@"
+        ;;
+    status)
+        shift
+        status_module "$@"
+        ;;
+    menu|interactive|"")
+        interactive_menu
+        ;;
+    *)
+        cat <<EOF
+Usage: recmod <command> [args]
+
+Commands:
+  list              List all discovered modules and RAM load status
+  json              Export module registry and live telemetry as JSON
+  load <id>         Dynamically load module & drivers into RAM
+  unload <id>       Unload module and free RAM
+  status [id]       Display live hardware telemetry and active state
+  menu              Launch interactive recovery terminal menu
+EOF
+        ;;
+esac

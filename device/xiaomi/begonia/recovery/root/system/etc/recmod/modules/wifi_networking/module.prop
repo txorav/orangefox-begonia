@@ -1,0 +1,7 @@
+id=wifi_networking
+name=MediaTek Combo Wi-Fi & WMT Stack
+version=1.1.0
+versionCode=11
+author=Begonia Recovery Engineering
+description=Initializes MediaTek MT6631/MT7668 combo driver, wmt_loader, wmt_launcher, and wpa_supplicant in RAM
+category=network
