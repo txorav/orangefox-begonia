@@ -1,0 +1,232 @@
+name: OrangeFox Recovery Build (begonia)
+
+on:
+  workflow_dispatch:
+    inputs:
+      makefile:
+        description: 'Lunch target'
+        required: false
+        default: 'twrp_begonia-eng'
+      build_target:
+        description: 'Make target'
+        required: false
+        default: 'recoveryimage'
+      fox_branch:
+        description: 'OrangeFox sync branch'
+        required: false
+        default: '12.1'
+      jobs:
+        description: 'Parallel make jobs'
+        required: false
+        default: '4'
+      ccache:
+        description: 'Use ccache (true/false)'
+        required: false
+        default: 'true'
+      publish_release:
+        description: 'Create a GitHub release with the image'
+        type: boolean
+        required: false
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  FOX_SYNC_URL: 'https://gitlab.com/OrangeFox/sync.git'
+  FOX_SYNC_BRANCH: ${{ github.event.inputs.fox_branch || '12.1' }}
+  SRC_DIR: 'aosp'
+  FOX_BUILD_TYPE: 'Unofficial'
+  CCACHE_DIR: '${{ github.workspace }}/.ccache'
+
+jobs:
+  build:
+    name: Build OrangeFox Recovery for Redmi Note 8 Pro (begonia)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout builder repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Show parameters & environment
+        run: |
+          echo "OrangeFox Sync : $FOX_SYNC_URL @ $FOX_SYNC_BRANCH"
+          echo "Lunch target   : ${{ inputs.makefile || 'twrp_begonia-eng' }}"
+          echo "Build target   : ${{ inputs.build_target || 'recoveryimage' }}"
+          echo "Jobs           : ${{ inputs.jobs || '4' }}"
+          echo "Free disk space before:"
+          df -h /
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                    /opt/hostedtoolcache \
+                    /usr/local/share/boost /usr/share/swift /opt/microsoft \
+                    /usr/local/.ghcup /usr/local/share/powershell \
+                    /usr/local/aws-cli /usr/local/aws-sam-cli /usr/lib/mono \
+                    /usr/share/java /opt/google /usr/local/julia* \
+                    /usr/local/share/chromium /usr/local/share/vcpkg || true
+          sudo docker system prune -af --volumes 2>/dev/null || true
+          sudo rm -rf /var/lib/docker/* 2>/dev/null || true
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /swapfile 2>/dev/null || true
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison ccache curl flex git git-lfs gnupg patch \
+            gcc-multilib g++-multilib \
+            lib32readline-dev lib32z1-dev libelf-dev liblz4-tool \
+            libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
+            lz4 pngcrush python3 rsync schedtool squashfs-tools unzip \
+            xz-utils zip zlib1g-dev openjdk-11-jdk-headless jq
+          sudo ln -sf /usr/bin/python3 /usr/bin/python 2>/dev/null || true
+          java -version 2>&1
+
+      - name: Set JDK 11
+        run: |
+          if [ -d "$JAVA_HOME_11_X64" ]; then
+            J="$JAVA_HOME_11_X64"
+          elif [ -x /usr/lib/jvm/java-11-openjdk-amd64/bin/java ]; then
+            J=/usr/lib/jvm/java-11-openjdk-amd64
+          else
+            J=$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")
+          fi
+          echo "JAVA_HOME=$J" >> "$GITHUB_ENV"
+          "$J/bin/java" -version 2>&1
+
+      - name: Configure swap memory
+        run: |
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /swapfile 2>/dev/null || true
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          swapon --show
+          free -h
+
+      - name: Install repo launcher & configure git
+        run: |
+          mkdir -p ~/.bin
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/.bin/repo
+          chmod a+x ~/.bin/repo
+          echo "$HOME/.bin" >> "$GITHUB_PATH"
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Restore ccache
+        if: ${{ (inputs.ccache || 'true') == 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-ofox-begonia-${{ github.run_id }}
+          restore-keys: |
+            ccache-ofox-begonia-
+
+      - name: Configure ccache
+        if: ${{ (inputs.ccache || 'true') == 'true' }}
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache -M 8G
+          ccache --zero-stats || true
+
+      - name: Sync OrangeFox sources
+        run: |
+          set -e
+          mkdir -p "$GITHUB_WORKSPACE/fox-sync"
+          git clone --depth=1 "$FOX_SYNC_URL" "$GITHUB_WORKSPACE/fox-sync"
+          cd "$GITHUB_WORKSPACE/fox-sync"
+          chmod +x ./orangefox_sync.sh
+          ./orangefox_sync.sh --branch "$FOX_SYNC_BRANCH" --path "$GITHUB_WORKSPACE/$SRC_DIR"
+
+      - name: Install device tree
+        run: |
+          set -e
+          mkdir -p "$SRC_DIR/device/xiaomi"
+          rm -rf "$SRC_DIR/device/xiaomi/begonia"
+          cp -a device/xiaomi/begonia "$SRC_DIR/device/xiaomi/begonia"
+
+      - name: Trim disk before build
+        run: |
+          du -sh "$SRC_DIR" 2>/dev/null || true
+          find "$SRC_DIR/prebuilts" -maxdepth 6 -type d -name .git -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$SRC_DIR/.repo/project-objects" -type d -name '*.git' -prune -exec rm -rf {} + 2>/dev/null || true
+          df -h /
+
+      - name: Compile OrangeFox
+        env:
+          USE_CCACHE: ${{ inputs.ccache || 'true' }}
+          ALLOW_MISSING_DEPENDENCIES: 'true'
+          BUILD_JOBS: ${{ inputs.jobs || '4' }}
+          MAKEFILE_NAME: ${{ inputs.makefile || 'twrp_begonia-eng' }}
+          BUILD_TARGET: ${{ inputs.build_target || 'recoveryimage' }}
+          BUILD_USERNAME: ${{ github.actor }}
+          BUILD_HOSTNAME: ofox-builder
+          FOX_BUILD_DEVICE: begonia
+          FOX_BUILD_TYPE: Unofficial
+        run: |
+          cd "$SRC_DIR"
+          set -o pipefail
+          : > build.log
+          set +e
+          source build/envsetup.sh >> build.log 2>&1
+          ENVSETUP_RC=$?
+          set -e
+          echo "envsetup finished with exit code ${ENVSETUP_RC}"
+          tail -n 20 build.log || true
+          if [ -z "$ANDROID_BUILD_TOP" ]; then
+            echo "::error::envsetup did not initialise ANDROID_BUILD_TOP"
+            exit 1
+          fi
+
+          set +e
+          lunch "$MAKEFILE_NAME" >> build.log 2>&1
+          LUNCH_RC=$?
+          set -e
+          tail -n 30 build.log || true
+          if [ "$LUNCH_RC" -ne 0 ] || [ -z "$TARGET_PRODUCT" ]; then
+            echo "::error::lunch failed or did not export TARGET_PRODUCT"
+            exit 1
+          fi
+          export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE
+          mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s || true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orangefox-begonia-build-log
+          path: ${{ env.SRC_DIR }}/build.log
+          if-no-files-found: ignore
+
+      - name: Upload recovery artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orangefox-begonia-recovery
+          path: |
+            ${{ env.SRC_DIR }}/out/target/product/begonia/OrangeFox-*.zip
+            ${{ env.SRC_DIR }}/out/target/product/begonia/recovery.img
+          if-no-files-found: warn
+
+      - name: Create GitHub Release
+        if: github.event.inputs.publish_release == 'true' || startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.SRC_DIR }}/out/target/product/begonia/OrangeFox-*.zip
+            ${{ env.SRC_DIR }}/out/target/product/begonia/recovery.img
+          generate_release_notes: true

@@ -1,0 +1,9 @@
+aosp/
+out/
+.ccache/
+fox-sync/
+*.img
+*.zip
+*.log
+.repo/
+.DS_Store
