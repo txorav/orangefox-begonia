@@ -1,0 +1,88 @@
+os: linux
+dist: jammy
+language: minimal
+sudo: required
+
+git:
+  depth: 1
+
+env:
+  global:
+    - SRC_DIR="${TRAVIS_BUILD_DIR}/aosp"
+    - FOX_SYNC_URL="https://gitlab.com/OrangeFox/sync.git"
+    - FOX_SYNC_BRANCH="12.1"
+    - MAKEFILE_NAME="twrp_begonia-eng"
+    - BUILD_TARGET="recoveryimage"
+    - BUILD_JOBS="$(nproc)"
+    - USE_CCACHE="1"
+    - CCACHE_DIR="${HOME}/.ccache"
+    - FOX_BUILD_DEVICE="begonia"
+    - FOX_BUILD_TYPE="Unofficial"
+    - ALLOW_MISSING_DEPENDENCIES="true"
+
+before_install:
+  # 1. Aggressive disk cleanup to survive on Travis 20GB-25GB root partition
+  - echo "=== Disk space before cleanup ===" && df -h /
+  - sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/share/swift /opt/microsoft /usr/local/.ghcup /usr/local/share/powershell /usr/local/aws-cli /usr/local/aws-sam-cli /usr/lib/mono /usr/share/java /opt/google /usr/local/julia* /usr/local/share/chromium /usr/local/share/vcpkg 2>/dev/null || true
+  - sudo docker system prune -af --volumes 2>/dev/null || true
+  - sudo rm -rf /var/lib/docker/* 2>/dev/null || true
+  - echo "=== Disk space after cleanup ===" && df -h /
+  # 2. Setup ZRAM compression to avoid 8GB swapfile eating root filesystem
+  - |
+    sudo modprobe zram num_devices=1 2>/dev/null || true
+    if command -v zramctl >/dev/null 2>&1; then
+      sudo zramctl --find --size 8G --algorithm zstd 2>/dev/null || true
+      DEV=$(zramctl -l | grep 8G | awk '{print $1}' | head -n1)
+      if [ -n "$DEV" ]; then
+        sudo mkswap "$DEV" && sudo swapon -p 100 "$DEV"
+      fi
+    fi
+  # 3. Heartbeat watchdog to prevent Travis 10-minute silence timeout
+  - |
+    ( while true; do
+        echo "[Travis Keepalive] $(date -u '+%Y-%m-%d %H:%M:%S UTC') | Free disk: $(df -h / | awk 'NR==2{print $4}') | Load: $(uptime | awk -F'load average:' '{print $2}')"
+        sleep 180
+      done ) &
+    KEEPALIVE_PID=$!
+
+install:
+  # 4. Install build dependencies
+  - sudo apt-get update -qq
+  - sudo apt-get install -y --no-install-recommends bc bison ccache curl flex git git-lfs gnupg patch gcc-multilib g++-multilib lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lz4 pngcrush python3 rsync schedtool squashfs-tools unzip xz-utils zip zlib1g-dev openjdk-11-jdk-headless jq
+  - sudo ln -sf /usr/bin/python3 /usr/bin/python 2>/dev/null || true
+  - mkdir -p ~/.bin && curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/.bin/repo && chmod a+x ~/.bin/repo
+  - export PATH="$HOME/.bin:$PATH"
+  - git config --global user.name "Travis CI"
+  - git config --global user.email "travis@build.org"
+  - mkdir -p "$CCACHE_DIR" && ccache -M 5G
+
+before_script:
+  # 5. Shallow sync recovery tree
+  - mkdir -p "$TRAVIS_BUILD_DIR/fox-sync" "$SRC_DIR"
+  - git clone --depth=1 "$FOX_SYNC_URL" "$TRAVIS_BUILD_DIR/fox-sync"
+  - cd "$TRAVIS_BUILD_DIR/fox-sync"
+  - chmod +x ./orangefox_sync.sh
+  - ./orangefox_sync.sh --branch "$FOX_SYNC_BRANCH" --path "$SRC_DIR"
+  # 6. CRITICAL DISK SAVER: Delete .repo directory to reclaim ~15GB
+  - rm -rf "$SRC_DIR/.repo"
+  - find "$SRC_DIR/prebuilts" -maxdepth 6 -type d -name .git -prune -exec rm -rf {} + 2>/dev/null || true
+  - echo "=== Disk space after source checkout & .repo wipe ===" && df -h /
+  # 7. Copy device tree
+  - mkdir -p "$SRC_DIR/device/xiaomi"
+  - rm -rf "$SRC_DIR/device/xiaomi/begonia"
+  - cp -a "$TRAVIS_BUILD_DIR/device/xiaomi/begonia" "$SRC_DIR/device/xiaomi/begonia"
+
+script:
+  # 8. Compile OrangeFox
+  - cd "$SRC_DIR"
+  - source build/envsetup.sh
+  - lunch "$MAKEFILE_NAME"
+  - mka -j"$BUILD_JOBS" "$BUILD_TARGET"
+
+after_script:
+  - kill "$KEEPALIVE_PID" 2>/dev/null || true
+  - ccache -s || true
+
+after_success:
+  - echo "=== Build Complete ==="
+  - ls -la "$SRC_DIR/out/target/product/begonia/"
