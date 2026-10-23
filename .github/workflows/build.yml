@@ -155,6 +155,25 @@ jobs:
           rm -rf "$SRC_DIR/device/xiaomi/begonia"
           cp -a device/xiaomi/begonia "$SRC_DIR/device/xiaomi/begonia"
 
+      - name: Prepare Wi-Fi and networking sources
+        run: |
+          set -e
+          cd "$SRC_DIR"
+          if [ ! -d "external/wpa_supplicant_8" ]; then
+            echo "Cloning external/wpa_supplicant_8..."
+            git clone --depth=1 -b android-12.1.0_r1 https://android.googlesource.com/platform/external/wpa_supplicant_8 external/wpa_supplicant_8
+          fi
+          if [ -f "external/wpa_supplicant_8/wpa_supplicant/android.config" ]; then
+            sed -i 's/^CONFIG_CTRL_IFACE_HIDL=y/#CONFIG_CTRL_IFACE_HIDL=y/' external/wpa_supplicant_8/wpa_supplicant/android.config
+          fi
+          if [ -f "device/xiaomi/begonia/patches/hidl.h" ]; then
+            cp -f device/xiaomi/begonia/patches/hidl.h external/wpa_supplicant_8/wpa_supplicant/hidl.h
+          fi
+          if [ ! -d "external/curl" ]; then
+            echo "Cloning external/curl..."
+            git clone --depth=1 -b android-12.1.0_r1 https://android.googlesource.com/platform/external/curl external/curl
+          fi
+
       - name: Trim disk before build
         run: |
           du -sh "$SRC_DIR" 2>/dev/null || true

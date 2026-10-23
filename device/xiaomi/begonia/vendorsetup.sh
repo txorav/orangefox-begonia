@@ -61,9 +61,9 @@ if [ "$1" = "$FDEVICE" ] || [ "$AERA_BUILD_DEVICE" = "$FDEVICE" ] || [ "$FOX_BUI
 	export TARGET_SCREEN_HEIGHT=2340
 	export OF_USE_GREEN_LED=0
 	export OF_FLASHLIGHT_ENABLE=1
-	export OF_FL_PATH1="/sys/class/leds/flashlight/brightness"
-	export OF_FL_PATH2="/sys/class/leds/torch-light0/brightness"
-	export OF_FLASHLIGHT_MAX_BRIGHTNESS=255
+	export OF_FL_PATH1="/sys/class/leds/torch-light0"
+	export OF_FL_PATH2="/sys/class/leds/flashlight"
+	export OF_FLASHLIGHT_MAX_BRIGHTNESS=2047
 	export OF_THEME_DARK=1
 	export OF_ENABLE_THEME_ENGINE=1
 	export OF_QUICK_BACKUP_LIST="/boot;/data;"
@@ -123,4 +123,22 @@ if [ "$1" = "$FDEVICE" ] || [ "$AERA_BUILD_DEVICE" = "$FDEVICE" ] || [ "$FOX_BUI
 	# AERA starts at R1.0; do not append legacy variant or patch suffixes.
 	unset AERA_VARIANT
 	unset AERA_MAINTAINER_PATCH_VERSION
+
+	# Auto-prepare recovery Wi-Fi & curl sources if missing in AOSP tree
+	local tree_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+	local top_dir="${ANDROID_BUILD_TOP:-$(pwd -P)}"
+	if [ -d "$top_dir/external" ]; then
+		if [ ! -d "$top_dir/external/wpa_supplicant_8" ]; then
+			echo "AERA: Cloning external/wpa_supplicant_8..."
+			git clone --depth=1 -b android-12.1.0_r1 https://android.googlesource.com/platform/external/wpa_supplicant_8 "$top_dir/external/wpa_supplicant_8" 2>/dev/null || true
+		fi
+		if [ -d "$top_dir/external/wpa_supplicant_8/wpa_supplicant" ]; then
+			sed -i 's/^CONFIG_CTRL_IFACE_HIDL=y/#CONFIG_CTRL_IFACE_HIDL=y/' "$top_dir/external/wpa_supplicant_8/wpa_supplicant/android.config" 2>/dev/null || true
+			[ -f "$tree_dir/patches/hidl.h" ] && cp -f "$tree_dir/patches/hidl.h" "$top_dir/external/wpa_supplicant_8/wpa_supplicant/hidl.h" 2>/dev/null || true
+		fi
+		if [ ! -d "$top_dir/external/curl" ]; then
+			echo "AERA: Cloning external/curl..."
+			git clone --depth=1 -b android-12.1.0_r1 https://android.googlesource.com/platform/external/curl "$top_dir/external/curl" 2>/dev/null || true
+		fi
+	fi
 fi

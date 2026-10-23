@@ -33,10 +33,13 @@ on boot
     start keymaster-4-0-beanpod
     start gatekeeper-1-0
 
-    # Flashlight / Torch sysfs nodes & symlink
-    chmod 0666 /sys/class/leds/flashlight/brightness
+    # Flashlight / Torch sysfs nodes & symlinks (MT6360 PMIC torch-light0)
     chmod 0666 /sys/class/leds/torch-light0/brightness
-    symlink /sys/class/leds/flashlight/brightness /system/etc/flashlight
+    chmod 0666 /sys/class/leds/torch-light0/max_brightness
+    chmod 0666 /sys/class/leds/torch-light1/brightness
+    chmod 0666 /sys/class/leds/torch-light1/max_brightness
+    symlink /sys/class/leds/torch-light0 /sys/class/leds/flashlight
+    symlink /sys/class/leds/torch-light0 /system/etc/flashlight
 
     # Haptic feedback & vibrator sysfs nodes
     chmod 0666 /sys/class/timed_output/vibrator/enable

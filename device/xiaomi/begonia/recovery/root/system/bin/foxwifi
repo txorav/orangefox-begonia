@@ -505,8 +505,32 @@ start_supp() {
         fi
     fi
 
-    log "starting wpa_supplicant"
-    wpa_supplicant -B -Dnl80211 -i"$IFACE" -c"$CONF" \
+    WPA_BIN=""
+    for bin in /system/bin/wpa_supplicant /vendor/bin/hw/wpa_supplicant /vendor/bin/wpa_supplicant /system/xbin/wpa_supplicant /sbin/wpa_supplicant; do
+        if [ -x "$bin" ]; then
+            WPA_BIN="$bin"
+            break
+        fi
+    done
+    if [ -z "$WPA_BIN" ]; then
+        WPA_BIN=$(command -v wpa_supplicant 2>/dev/null)
+    fi
+    if [ -z "$WPA_BIN" ]; then
+        for rom_bin in /vendor/bin/hw/wpa_supplicant /system_root/system/bin/wpa_supplicant; do
+            if [ -x "$rom_bin" ]; then
+                WPA_BIN="$rom_bin"
+                break
+            fi
+        done
+    fi
+    if [ -z "$WPA_BIN" ] || [ ! -x "$WPA_BIN" ]; then
+        log "wpa_supplicant binary not found in PATH or filesystem"
+        fail "wpa_supplicant binary is missing from recovery image"
+        return 1
+    fi
+
+    log "starting wpa_supplicant using $WPA_BIN"
+    "$WPA_BIN" -B -Dnl80211 -i"$IFACE" -c"$CONF" \
         -P"$TMP/wpa.pid" >>"$LOG" 2>&1
     rc=$?
     if [ "$rc" -ne 0 ]; then
