@@ -10,6 +10,15 @@ on init
     export LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw
     # Let the bundled curl validate HTTPS against the recovery CA bundle.
     export CURL_CA_BUNDLE /system/etc/security/cacert.pem
+    start hwservicemanager
+    start servicemanager
+
+on boot
+    start hwservicemanager
+    start servicemanager
+    start teei_daemon
+    start keymaster-4-0-beanpod
+    start gatekeeper-1-0
 
 on property:ro.crypto.state=encrypted && property:ro.crypto.type=file
     install_keyring
