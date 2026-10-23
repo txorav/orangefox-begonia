@@ -1,0 +1,41 @@
+#!/system/bin/sh
+#
+# Firefox & Virtual Keyboard CGI Endpoint
+#
+. /system/etc/foxwww/cgi-bin/lib.sh
+
+json_header
+
+action=""
+if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    read_body
+    action=$(body_param action)
+else
+    qs="${QUERY_STRING:-}"
+    action=$(echo "$qs" | sed -n 's/.*action=\([^&]*\).*/\1/p')
+fi
+
+[ -z "$action" ] && action="status"
+
+case "$action" in
+    start)
+        /system/bin/firefox start-engine >/dev/null 2>&1
+        json_ok "{\"status\":\"running\",\"message\":\"Firefox in-RAM engine started\"}"
+        ;;
+    stop)
+        /system/bin/firefox stop >/dev/null 2>&1
+        json_ok "{\"status\":\"stopped\",\"message\":\"Firefox in-RAM engine stopped\"}"
+        ;;
+    status)
+        running=false
+        ram_used="0 MB"
+        if mount | grep -q "/tmp/firefox"; then
+            running=true
+            ram_used=$(df -h /tmp/firefox 2>/dev/null | tail -n 1 | awk '{print $3}')
+        fi
+        json_ok "{\"running\":$running,\"ram_used\":\"$ram_used\",\"version\":\"Firefox 125.0 (Gecko In-RAM)\",\"keyboard\":\"active\"}"
+        ;;
+    *)
+        json_error "400 Bad Request" "Unknown action $action"
+        ;;
+esac

@@ -734,3 +734,70 @@ dialog .actions { justify-content: flex-end; }
     max-width: none;
   }
 }
+
+/* Firefox Web Browser & On-Screen Touch Keyboard */
+.chip-bm {
+  background: var(--card-hi);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.chip-bm:hover {
+  background: rgba(255, 122, 24, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.virtual-keyboard {
+  animation: fadeIn 0.2s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.vk-row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+.vk-key {
+  flex: 1;
+  min-width: 24px;
+  height: 38px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  transition: transform 0.06s ease, background 0.12s ease;
+}
+.vk-key:active {
+  transform: scale(0.90);
+  background: var(--accent);
+  color: #000;
+}
+.vk-wide {
+  flex: 1.5;
+  font-size: 11px;
+}
+.vk-space {
+  flex: 3;
+}
+.vk-primary {
+  background: rgba(255, 122, 24, 0.2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.vk-danger {
+  background: rgba(255, 92, 108, 0.15);
+  border-color: rgba(255, 92, 108, 0.4);
+  color: #ff808e;
+}

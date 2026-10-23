@@ -1240,12 +1240,215 @@
     } catch(e) { toast(e.message, 'bad'); }
   });
 
+  // --- Firefox Browser & Virtual Touch Keyboard ---
+  function initBrowserAndKeyboard() {
+    const urlInput = $('#browserUrl');
+    const viewport = $('#browserContent');
+    const loading = $('#browserLoading');
+    const keyboard = $('#virtualKeyboard');
+    let shiftActive = false;
+    let symbolsActive = false;
+    let activeInput = urlInput;
+
+    document.addEventListener('focusin', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        activeInput = e.target;
+      }
+    });
+
+    $('#btnToggleKeyboard')?.addEventListener('click', () => {
+      const isHidden = keyboard.style.display === 'none';
+      keyboard.style.display = isHidden ? 'block' : 'none';
+      $('#keyboardStateDisplay').textContent = isHidden ? 'Visible' : 'Hidden';
+    });
+
+    $('#btnHideKeyboard')?.addEventListener('click', () => {
+      keyboard.style.display = 'none';
+      $('#keyboardStateDisplay').textContent = 'Hidden';
+    });
+
+    keyboard?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.vk-key');
+      if (!btn) return;
+      e.preventDefault();
+
+      const key = btn.dataset.key;
+      const insert = btn.dataset.insert;
+      const action = btn.dataset.action;
+
+      if (!activeInput) activeInput = urlInput;
+
+      if (key) {
+        const char = shiftActive ? key.toUpperCase() : key;
+        const start = activeInput.selectionStart || activeInput.value.length;
+        const end = activeInput.selectionEnd || activeInput.value.length;
+        activeInput.value = activeInput.value.slice(0, start) + char + activeInput.value.slice(end);
+        activeInput.selectionStart = activeInput.selectionEnd = start + char.length;
+        if (shiftActive) {
+          shiftActive = false;
+          $('#vkShift')?.classList.remove('vk-primary');
+          updateKeyCase();
+        }
+      } else if (insert) {
+        const start = activeInput.selectionStart || activeInput.value.length;
+        activeInput.value = activeInput.value.slice(0, start) + insert + activeInput.value.slice(start);
+        activeInput.selectionStart = activeInput.selectionEnd = start + insert.length;
+      } else if (action === 'backspace') {
+        const start = activeInput.selectionStart || activeInput.value.length;
+        if (start > 0) {
+          activeInput.value = activeInput.value.slice(0, start - 1) + activeInput.value.slice(start);
+          activeInput.selectionStart = activeInput.selectionEnd = start - 1;
+        }
+      } else if (action === 'shift') {
+        shiftActive = !shiftActive;
+        $('#vkShift')?.classList.toggle('vk-primary', shiftActive);
+        updateKeyCase();
+      } else if (action === 'symbols') {
+        symbolsActive = !symbolsActive;
+        $('#vkSym')?.classList.toggle('vk-primary', symbolsActive);
+        toggleSymbolsMode();
+      } else if (action === 'clear') {
+        activeInput.value = '';
+      } else if (action === 'enter') {
+        if (activeInput === urlInput) {
+          navigateBrowser();
+        }
+      }
+      activeInput.focus();
+    });
+
+    function updateKeyCase() {
+      keyboard?.querySelectorAll('.vk-key[data-key]').forEach((k) => {
+        const raw = k.dataset.key;
+        if (raw && raw.length === 1 && raw.match(/[a-z]/i)) {
+          k.textContent = shiftActive ? raw.toUpperCase() : raw.toLowerCase();
+        }
+      });
+    }
+
+    function toggleSymbolsMode() {
+      const symMap = {
+        '1': '!', '2': '@', '3': '#', '4': '$', '5': '%',
+        '6': '^', '7': '&', '8': '*', '9': '(', '0': ')',
+        '-': '_', '=': '+'
+      };
+      keyboard?.querySelectorAll('.vk-key[data-key]').forEach((k) => {
+        const raw = k.dataset.key;
+        if (symMap[raw]) {
+          k.textContent = symbolsActive ? symMap[raw] : raw;
+        }
+      });
+    }
+
+    document.querySelectorAll('.chip-bm').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        if (urlInput) urlInput.value = chip.dataset.url;
+        navigateBrowser();
+      });
+    });
+
+    async function navigateBrowser() {
+      let q = urlInput.value.trim();
+      if (!q) return;
+
+      const engine = $('#browserSearchEngine')?.value || 'ddg';
+      if (!q.startsWith('http://') && !q.startsWith('https://')) {
+        if (q.includes(' ') || !q.includes('.')) {
+          if (engine === 'google') q = `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+          else if (engine === 'github') q = `https://github.com/search?q=${encodeURIComponent(q)}`;
+          else if (engine === 'xda') q = `https://xdaforums.com/search/?q=${encodeURIComponent(q)}`;
+          else q = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`;
+        } else {
+          q = 'https://' + q;
+        }
+        urlInput.value = q;
+      }
+
+      if (loading) loading.style.display = 'block';
+      if (viewport) viewport.style.display = 'none';
+
+      try {
+        const res = await api(`/cgi-bin/browse?url=${encodeURIComponent(q)}`);
+        if (loading) loading.style.display = 'none';
+        if (viewport) viewport.style.display = 'block';
+
+        if (res && res.title) {
+          let html = `<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:8px; margin-bottom:12px;">`;
+          html += `<strong style="font-size:14px; color:var(--text);">${escapeHtml(res.title)}</strong>`;
+          html += `<a href="${escapeHtml(q)}" target="_blank" class="chip-bm" style="text-decoration:none;">Open External &nearr;</a>`;
+          html += `</div>`;
+
+          if (res.text) {
+            html += `<div style="white-space:pre-wrap; word-break:break-word; color:var(--muted); font-size:12px;">${escapeHtml(res.text)}</div>`;
+          }
+
+          if (res.links && res.links.length) {
+            html += `<h4 style="margin:16px 0 8px; color:var(--accent);">Links on this page:</h4><ul style="margin:0; padding-left:18px;">`;
+            res.links.forEach((l) => {
+              const isPkg = l.url && (l.url.endsWith('.zip') || l.url.endsWith('.img'));
+              html += `<li style="margin-bottom:6px;">`;
+              html += `<a href="#" class="browser-nav-link" data-url="${escapeHtml(l.url)}" style="color:var(--link); text-decoration:none;">${escapeHtml(l.text || l.url)}</a>`;
+              if (isPkg) {
+                html += ` <button class="primary small btn-flash-pkg" data-url="${escapeHtml(l.url)}" style="margin-left:8px; padding:3px 8px; font-size:11px;">⚡ Download &amp; Flash</button>`;
+              }
+              html += `</li>`;
+            });
+            html += `</ul>`;
+          }
+
+          viewport.innerHTML = html;
+
+          viewport.querySelectorAll('.browser-nav-link').forEach((a) => {
+            a.addEventListener('click', (ev) => {
+              ev.preventDefault();
+              urlInput.value = a.dataset.url;
+              navigateBrowser();
+            });
+          });
+
+          viewport.querySelectorAll('.btn-flash-pkg').forEach((b) => {
+            b.addEventListener('click', async (ev) => {
+              ev.preventDefault();
+              const pkgUrl = b.dataset.url;
+              if (!confirm(`Download and queue flash for: ${pkgUrl}?`)) return;
+              try {
+                toast('Starting download and flash queue...', 'good');
+                await api('/cgi-bin/download', {
+                  method: 'POST',
+                  body: new URLSearchParams({ url: pkgUrl, flash: '1' })
+                });
+                toast('Package queued for recovery install!', 'good');
+              } catch (err) {
+                toast('Download failed: ' + err.message, 'bad');
+              }
+            });
+          });
+        } else {
+          viewport.innerHTML = `<p class="muted">Empty response received.</p>`;
+        }
+      } catch (err) {
+        if (loading) loading.style.display = 'none';
+        if (viewport) {
+          viewport.style.display = 'block';
+          viewport.innerHTML = `<p style="color:#ff808e;">Failed to load webpage: ${escapeHtml(err.message)}</p>`;
+        }
+      }
+    }
+
+    $('#btnBrowserGo')?.addEventListener('click', navigateBrowser);
+    $('#btnBrowserReload')?.addEventListener('click', navigateBrowser);
+    urlInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') navigateBrowser();
+    });
+  }
+
   initTheme();
   renderWebQr();
   loadRootModules();
   loadRecmod();
   loadLayout();
   loadOpenCode();
+  initBrowserAndKeyboard();
 
   if (token.get()) {
     loadFiles(state.files.path).catch(() => { /* the file card shows the error */ });

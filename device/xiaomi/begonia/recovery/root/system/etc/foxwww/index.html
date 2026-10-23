@@ -245,6 +245,96 @@
     </div>
   </section>
 
+  <section class="card" id="browserCard">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Internet &amp; Downloads</p>
+        <h2>Firefox Web Browser &amp; Touch Keyboard</h2>
+      </div>
+      <div class="actions">
+        <span id="firefoxPill" class="pill good"><span class="dot"></span><span id="firefoxState">Ready</span></span>
+        <button id="btnToggleKeyboard" class="ghost small">⌨️ Toggle Keyboard</button>
+      </div>
+    </div>
+    <div class="metrics">
+      <div><span>Engine</span><strong>Firefox (Gecko)</strong></div>
+      <div><span>In-RAM Engine</span><strong id="firefoxRamDisplay">Active</strong></div>
+      <div><span>Touch Keyboard</span><strong id="keyboardStateDisplay">Visible</strong></div>
+    </div>
+
+    <!-- Browser URL Bar & Controls -->
+    <div class="browser-bar" style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <button id="btnBrowserBack" class="ghost small" title="Back">&larr;</button>
+      <button id="btnBrowserForward" class="ghost small" title="Forward">&rarr;</button>
+      <button id="btnBrowserReload" class="ghost small" title="Reload">&#x21bb;</button>
+      <input id="browserUrl" type="url" placeholder="Enter URL or search term..." value="https://xdaforums.com/f/redmi-note-8-pro-roms-kernels-recoveries.9297/" style="flex:1; min-width:200px; background:var(--card-hi); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:13px;">
+      <select id="browserSearchEngine" style="background:var(--card-hi); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:8px 10px; font-size:12px;">
+        <option value="ddg">DuckDuckGo</option>
+        <option value="google">Google</option>
+        <option value="github">GitHub</option>
+        <option value="xda">XDA Begonia</option>
+      </select>
+      <button id="btnBrowserGo" class="primary small">Go</button>
+    </div>
+
+    <!-- Quick Bookmarks -->
+    <div class="bookmarks-bar" style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">
+      <button class="chip-bm" data-url="https://xdaforums.com/f/redmi-note-8-pro-roms-kernels-recoveries.9297/">📱 XDA Begonia</button>
+      <button class="chip-bm" data-url="https://xiaomifirmwareupdater.com/archive/miui/begonia/">⚡ MIUI Firmware</button>
+      <button class="chip-bm" data-url="https://github.com/topjohnwu/Magisk/releases">🛡️ Magisk Releases</button>
+      <button class="chip-bm" data-url="https://github.com/tiann/KernelSU/releases">⚡ KernelSU</button>
+      <button class="chip-bm" data-url="https://github.com/bmax121/APatch/releases">🩹 APatch</button>
+      <button class="chip-bm" data-url="https://github.com/txorav/orangefox-begonia">🦊 Begonia Tree</button>
+    </div>
+
+    <!-- Web View Frame / Content Area -->
+    <div id="browserViewport" style="margin-top:14px; background:var(--bg); border:1px solid var(--line); border-radius:12px; min-height:200px; max-height:420px; overflow-y:auto; padding:14px; font-size:13px; line-height:1.5;">
+      <div id="browserLoading" style="display:none; text-align:center; padding:30px; color:var(--muted);"><span class="spinner"></span>Loading webpage&hellip;</div>
+      <div id="browserContent">
+        <h3 style="margin-top:0; color:var(--accent);">Firefox Recovery Browser &amp; Package Downloader</h3>
+        <p class="muted">Browse websites, search ROMs/mods, and click any package link to download and flash automatically in recovery.</p>
+        <div style="background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:10px;">
+          <strong>Quick Instructions:</strong>
+          <ul style="margin:8px 0 0 18px; padding:0; color:var(--muted);">
+            <li>Enter any URL or search query above, then tap <b>Go</b> or press Enter on the touch keyboard.</li>
+            <li>Click any <code>.zip</code> or <code>recovery.img</code> download link to trigger instant download and flash.</li>
+            <li>Use the on-screen touch virtual keyboard below for fast typing on touchscreens.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Interactive On-Screen Touch Virtual Keyboard -->
+    <div id="virtualKeyboard" class="virtual-keyboard" style="margin-top:14px; background:var(--card-hi); border:1px solid var(--line); border-radius:12px; padding:10px; user-select:none;">
+      <div class="vk-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px;">On-Screen Touch Keyboard &middot; Begonia 1080&times;2340</span>
+        <button id="btnHideKeyboard" class="ghost" style="font-size:11px; padding:2px 8px; border-radius:6px;">Hide &darr;</button>
+      </div>
+      <div class="vk-rows" style="display:flex; flex-direction:column; gap:5px;">
+        <!-- Row 1: Numbers -->
+        <div class="vk-row">
+          <button class="vk-key" data-key="1">1</button><button class="vk-key" data-key="2">2</button><button class="vk-key" data-key="3">3</button><button class="vk-key" data-key="4">4</button><button class="vk-key" data-key="5">5</button><button class="vk-key" data-key="6">6</button><button class="vk-key" data-key="7">7</button><button class="vk-key" data-key="8">8</button><button class="vk-key" data-key="9">9</button><button class="vk-key" data-key="0">0</button><button class="vk-key" data-key="-">-</button><button class="vk-key" data-key="=">=</button><button class="vk-key vk-wide vk-danger" data-action="backspace">&larr; Del</button>
+        </div>
+        <!-- Row 2: QWERTY -->
+        <div class="vk-row">
+          <button class="vk-key" data-key="q">q</button><button class="vk-key" data-key="w">w</button><button class="vk-key" data-key="e">e</button><button class="vk-key" data-key="r">r</button><button class="vk-key" data-key="t">t</button><button class="vk-key" data-key="y">y</button><button class="vk-key" data-key="u">u</button><button class="vk-key" data-key="i">i</button><button class="vk-key" data-key="o">o</button><button class="vk-key" data-key="p">p</button><button class="vk-key" data-key="[">[</button><button class="vk-key" data-key="]">]</button><button class="vk-key" data-key="/">/</button>
+        </div>
+        <!-- Row 3: ASDF -->
+        <div class="vk-row">
+          <button class="vk-key" data-key="a">a</button><button class="vk-key" data-key="s">s</button><button class="vk-key" data-key="d">d</button><button class="vk-key" data-key="f">f</button><button class="vk-key" data-key="g">g</button><button class="vk-key" data-key="h">h</button><button class="vk-key" data-key="j">j</button><button class="vk-key" data-key="k">k</button><button class="vk-key" data-key="l">l</button><button class="vk-key" data-key=":">:</button><button class="vk-key" data-key=".">.</button><button class="vk-key vk-wide vk-primary" data-action="enter">&crarr; Go</button>
+        </div>
+        <!-- Row 4: ZXCV -->
+        <div class="vk-row">
+          <button class="vk-key vk-wide" id="vkShift" data-action="shift">&uArr; Shift</button><button class="vk-key" data-key="z">z</button><button class="vk-key" data-key="x">x</button><button class="vk-key" data-key="c">c</button><button class="vk-key" data-key="v">v</button><button class="vk-key" data-key="b">b</button><button class="vk-key" data-key="n">n</button><button class="vk-key" data-key="m">m</button><button class="vk-key" data-key=",">,</button><button class="vk-key" data-key="?">?</button><button class="vk-key vk-wide" id="vkSym" data-action="symbols">?123</button>
+        </div>
+        <!-- Row 5: Space & Shortcuts -->
+        <div class="vk-row">
+          <button class="vk-key" data-insert="https://">https://</button><button class="vk-key" data-insert=".com">.com</button><button class="vk-key vk-space" data-key=" ">SPACE</button><button class="vk-key" data-insert="begonia">begonia</button><button class="vk-key vk-danger" data-action="clear">Clear</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="card">
     <div class="section-head">
       <div>

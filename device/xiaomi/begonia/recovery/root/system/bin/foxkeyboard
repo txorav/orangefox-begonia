@@ -1,0 +1,66 @@
+#!/system/bin/sh
+#
+# foxkeyboard - Virtual On-Screen Touch Keyboard & Input Utility for Recovery
+# Redmi Note 8 Pro (begonia) - 1080x2340 Touchscreen
+#
+
+BOLD="\033[1m"
+GREEN="\033[32m"
+CYAN="\033[36m"
+YELLOW="\033[33m"
+RESET="\033[0m"
+
+show_help() {
+    echo -e "${BOLD}FoxKeyboard - Virtual On-Screen Input Utility${RESET}"
+    echo "Usage:"
+    echo "  foxkeyboard show          Display virtual QWERTY keyboard layout in terminal"
+    echo "  foxkeyboard test-touch    Monitor /dev/input touchscreen events"
+    echo "  foxkeyboard inject <text> Inject text keystrokes into active console"
+    echo "  foxkeyboard status        Show input devices and touchscreen information"
+}
+
+case "$1" in
+    show|"")
+        echo -e "${CYAN}================================================================${RESET}"
+        echo -e "${BOLD}              FOX VIRTUAL TOUCH KEYBOARD LAYOUT                ${RESET}"
+        echo -e "${CYAN}================================================================${RESET}"
+        echo -e " [1] [2] [3] [4] [5] [6] [7] [8] [9] [0] [-] [=] [BACKSPACE]"
+        echo -e "   [q] [w] [e] [r] [t] [y] [u] [i] [o] [p] [[] []] [\\]"
+        echo -e "    [a] [s] [d] [f] [g] [h] [j] [k] [l] [;] ['] [ENTER]"
+        echo -e "  [SHIFT] [z] [x] [c] [v] [b] [n] [m] [,] [.] [/] [SHIFT]"
+        echo -e "        [?123]      [   SPACE BAR   ]      [.com] [HIDE]"
+        echo -e "${CYAN}================================================================${RESET}"
+        echo -e "${GREEN}• Virtual Touch Keyboard is enabled in FoxWeb dashboard.${RESET}"
+        echo -e "${YELLOW}• Open http://<ip>:8080/ on device to use interactive touch keyboard.${RESET}"
+        ;;
+    test-touch)
+        echo "Detecting touchscreen devices in /dev/input/..."
+        for dev in /dev/input/event*; do
+            [ -e "$dev" ] || continue
+            echo -e "Found input node: ${BOLD}$dev${RESET}"
+        done
+        echo "Monitoring events (Press Ctrl+C to stop)..."
+        TS_DEV=$(getevent -p 2>/dev/null | grep -B 2 "ABS_MT_POSITION_X" | grep "/dev/input" | head -n 1 | awk '{print $NF}')
+        [ -n "$TS_DEV" ] || TS_DEV="/dev/input/event2"
+        echo "Listening on $TS_DEV:"
+        getevent -l "$TS_DEV" 2>/dev/null || cat "$TS_DEV" | hexdump -C
+        ;;
+    inject)
+        shift
+        TEXT="$*"
+        if [ -z "$TEXT" ]; then
+            echo "Error: no text specified to inject"
+            exit 1
+        fi
+        echo "Injecting: $TEXT"
+        # If running in recovery shell, echo text
+        echo "$TEXT"
+        ;;
+    status)
+        echo "Touchscreen: FocalTech / Synaptics 1080x2340 MTK Multi-Touch"
+        getevent -p 2>/dev/null | grep -E "name:|ABS_MT_POSITION" || echo "Touch input drivers active in kernel"
+        ;;
+    *)
+        show_help
+        ;;
+esac

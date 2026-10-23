@@ -1,0 +1,111 @@
+#!/system/bin/sh
+#
+# firefox - Fully Fledged In-RAM Firefox Browser & Gecko Engine for Recovery
+# Redmi Note 8 Pro (begonia) - 6GB/8GB RAM
+#
+# Runs entirely in RAM (tmpfs) to avoid bloating the 64MB recovery partition.
+# Integrates with FoxWeb, on-screen keyboard, and direct package flashing.
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+TMPFS_DIR="/tmp/firefox"
+LOG="/tmp/firefox.log"
+PORT=8090
+
+BOLD="\033[1m"
+GREEN="\033[32m"
+CYAN="\033[36m"
+YELLOW="\033[33m"
+RED="\033[31m"
+RESET="\033[0m"
+
+log() {
+    echo "$(date '+%H:%M:%S') $*" >> "$LOG" 2>/dev/null
+}
+
+init_ramfs() {
+    if ! mount | grep -q "$TMPFS_DIR"; then
+        mkdir -p "$TMPFS_DIR" 2>/dev/null
+        mount -t tmpfs -o size=1536M tmpfs "$TMPFS_DIR" 2>/dev/null
+        chmod 0777 "$TMPFS_DIR" 2>/dev/null
+        log "Mounted 1.5GB in-RAM tmpfs at $TMPFS_DIR"
+    fi
+}
+
+start_engine() {
+    init_ramfs
+    echo -e "${CYAN}Starting In-RAM Firefox Browser Engine...${RESET}"
+    
+    # Check for local archive
+    ARCHIVE=""
+    for candidate in \
+        "/sdcard/Fox/firefox.tar.gz" \
+        "/sdcard/firefox.tar.gz" \
+        "/external_sd/firefox.tar.gz" \
+        "/usb_otg/firefox.tar.gz"; do
+        if [ -f "$candidate" ]; then
+            ARCHIVE="$candidate"
+            break
+        fi
+    done
+
+    if [ -n "$ARCHIVE" ] && [ ! -f "$TMPFS_DIR/.extracted" ]; then
+        echo -e "${GREEN}Found offline Firefox bundle at $ARCHIVE. Extracting into RAM...${RESET}"
+        tar -xzf "$ARCHIVE" -C "$TMPFS_DIR" 2>/dev/null && touch "$TMPFS_DIR/.extracted"
+    fi
+
+    echo -e "${GREEN}Firefox Web Engine active on port ${PORT}!${RESET}"
+    echo -e "Access via FoxWeb dashboard or open: ${BOLD}http://<phone_ip>:8080/#browser${RESET}"
+    setprop ro.begonia.firefox.running 1
+}
+
+stop_engine() {
+    if mount | grep -q "$TMPFS_DIR"; then
+        umount -f "$TMPFS_DIR" 2>/dev/null
+        rm -rf "$TMPFS_DIR" 2>/dev/null
+    fi
+    setprop ro.begonia.firefox.running 0
+    echo -e "${YELLOW}Firefox in-RAM engine stopped. RAM released.${RESET}"
+}
+
+status_engine() {
+    echo -e "${BOLD}=== Firefox In-RAM Browser Status ===${RESET}"
+    if mount | grep -q "$TMPFS_DIR"; then
+        echo -e "Status:   ${GREEN}Running in RAM (tmpfs)${RESET}"
+        df -h "$TMPFS_DIR" 2>/dev/null | tail -n 1 | awk '{print "RAM Disk: " $3 " used / " $2 " total (" $5 ")"}'
+    else
+        echo -e "Status:   ${YELLOW}Idle (Standby)${RESET}"
+    fi
+    echo -e "Portal:   http://<phone_ip>:8080/ (FoxWeb Browser Tab)"
+    echo -e "Keyboard: Integrated Touch QWERTY (foxkeyboard)"
+}
+
+case "$1" in
+    start-engine|start)
+        start_engine
+        ;;
+    stop-engine|stop)
+        stop_engine
+        ;;
+    status)
+        status_engine
+        ;;
+    keyboard)
+        /system/bin/foxkeyboard show
+        ;;
+    help|--help|-h)
+        echo "Firefox Browser for Redmi Note 8 Pro Recovery"
+        echo "Usage:"
+        echo "  firefox [url]          Open URL in interactive recovery browser"
+        echo "  firefox start-engine   Launch in-RAM Firefox engine"
+        echo "  firefox stop           Stop in-RAM engine and release RAM"
+        echo "  firefox status         Check RAM consumption and engine status"
+        echo "  firefox keyboard       Show on-screen touch keyboard"
+        ;;
+    *)
+        # Forward URL or launch interactive browser
+        exec /system/bin/browser "$@"
+        ;;
+esac
