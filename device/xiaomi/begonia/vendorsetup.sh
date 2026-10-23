@@ -43,7 +43,7 @@ if [ "$1" = "$FDEVICE" ] || [ "$AERA_BUILD_DEVICE" = "$FDEVICE" ] || [ "$FOX_BUI
 	# Unified partition support (physical by-name or retrofitted super/dynamic).
 	export TARGET_DEVICE_ALT="begonia,begoniain"
 	export AERA_TARGET_DEVICES="$TARGET_DEVICE_ALT"
-	export OF_TARGET_DEVICES="$TARGET_DEVICE_ALT"
+	export FOX_TARGET_DEVICES="$TARGET_DEVICE_ALT"
 
 	# OrangeFox specific settings
 	export FOX_BUILD_DEVICE="begonia"
@@ -82,8 +82,8 @@ if [ "$1" = "$FDEVICE" ] || [ "$AERA_BUILD_DEVICE" = "$FDEVICE" ] || [ "$FOX_BUI
 	export OF_PATCH_AVB20=1
 	export OF_DEFAULT_KEYMASTER_VERSION="4.0"
 	export TW_FORCE_KEYMASTER_VER=true
-	export OF_FBE_METADATA_MOUNT_IGNORE=0
-	export OF_FIX_DECRYPTION_ON_DATA_MEDIA=0
+	export OF_FBE_METADATA_MOUNT_IGNORE=1
+	export OF_FIX_DECRYPTION_ON_DATA_MEDIA=1
 
 	# Tools and utilities
 	export AERA_USE_BASH_SHELL=1

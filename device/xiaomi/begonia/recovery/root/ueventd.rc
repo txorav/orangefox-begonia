@@ -146,3 +146,13 @@
 
 #MTK In-House TEE
 /dev/ttyACM0              0660   radio      radio
+
+# Beanpod TEE & Keymaster dev nodes
+/dev/teei_client          0660   system     system
+/dev/teei_config          0660   system     system
+/dev/isee_tee0            0666   system     drmrpc
+/dev/tz_vfs               0660   system     system
+/dev/teei_fp              0660   system     system
+/dev/ut_keymaster         0660   system     drmrpc
+/dev/rpmb0                0660   system     system
+

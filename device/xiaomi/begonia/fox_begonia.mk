@@ -26,10 +26,10 @@ OF_DEFAULT_KEYMASTER_VERSION := 4.0
 # This recovery only ships the keymaster 4.0 service, so do not let a
 # ROM-provided 4.1/3.0 prop select a service that does not exist here.
 TW_FORCE_KEYMASTER_VER := true
-# Mount /metadata so vold can read the encryption keys properly
-OF_FBE_METADATA_MOUNT_IGNORE := 0
-# Do not prematurely mount un-decrypted data/media to /sdcard
-OF_FIX_DECRYPTION_ON_DATA_MEDIA := 0
+# Ignore metadata mount errors if ROM uses legacy FBE v1 without separate metadata
+OF_FBE_METADATA_MOUNT_IGNORE := 1
+# Apply OrangeFox data/media decryption remount workaround for Begonia
+OF_FIX_DECRYPTION_ON_DATA_MEDIA := 1
 
 # Tools and backup behaviour
 OF_ENABLE_LPTOOLS := 1
