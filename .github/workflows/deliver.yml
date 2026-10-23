@@ -2,6 +2,8 @@ name: Deliver OrangeFox Artifacts
 
 on:
   push:
+    branches:
+      - main
     paths:
       - '.github/workflows/deliver.yml'
   workflow_dispatch:
