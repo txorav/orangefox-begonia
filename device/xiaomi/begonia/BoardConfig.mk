@@ -130,6 +130,7 @@ PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
 # Crypto & Decryption
 TW_INCLUDE_CRYPTO := true
 TW_INCLUDE_CRYPTO_FBE := true
+TW_USE_FSCRYPT_POLICY := 1
 BOARD_USES_METADATA_PARTITION := true
 # Begonia MT6785 uses pure FBE v1 without dm-crypt metadata encryption
 TW_INCLUDE_FBE_METADATA_DECRYPT := false

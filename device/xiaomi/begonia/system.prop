@@ -7,6 +7,8 @@ ro.hardware.gatekeeper=beanpod
 ro.mtk_tee_gp_support=1
 ro.mtk_microtrust_tee_support=1
 ro.product.device=begonia
-ro.crypto.volume.filenames_mode=aes-256-cts
+keymaster_ver=4.0
+ro.crypto.volume.options=aes-256-xts:aes-256-cts:v1
+ro.crypto.volume.filenames_mode=aes-256-cts:v1
 # fastbootd - required to flash/erase logical (dynamic) partitions
 ro.fastbootd.available=true
