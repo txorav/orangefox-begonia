@@ -1,0 +1,119 @@
+#!/system/bin/sh
+#
+# Web Browse & Search API Endpoint for FoxWeb Dashboard
+#
+. /system/etc/foxwww/cgi-bin/lib.sh
+
+json_header
+
+url=""
+search=""
+if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    read_body
+    url=$(body_param url)
+    search=$(body_param search)
+else
+    # Parse query string
+    qs="${QUERY_STRING:-}"
+    url=$(echo "$qs" | sed -n 's/.*url=\([^&]*\).*/\1/p' | sed 's/%20/ /g; s/%3A/:/g; s/%2F/\//g; s/%3F/?/g; s/%3D/=/g; s/%26/\&/g')
+    search=$(echo "$qs" | sed -n 's/.*search=\([^&]*\).*/\1/p' | sed 's/%20/ /g')
+fi
+
+if [ -n "$search" ]; then
+    encoded=$(echo "$search" | sed 's/ /+/g')
+    url="https://lite.duckduckgo.com/lite/?q=${encoded}"
+fi
+
+if [ -z "$url" ]; then
+    url="https://lite.duckduckgo.com/lite/"
+fi
+
+case "$url" in
+    http://*|https://*) ;;
+    *) url="https://${url}" ;;
+esac
+
+CA_CERT="/system/etc/security/cacert.pem"
+[ -f "$CA_CERT" ] || CA_CERT=""
+
+TMP_PAGE="/tmp/foxweb_browse_$$.html"
+TMP_LINKS="/tmp/foxweb_links_$$.txt"
+TMP_TEXT="/tmp/foxweb_text_$$.txt"
+
+ca_opt=""
+[ -n "$CA_CERT" ] && ca_opt="--cacert $CA_CERT"
+UA="Mozilla/5.0 (Linux; Android 12; Begonia) OrangeFox/12.1 Browser"
+
+curl -sL $ca_opt -A "$UA" --max-time 15 "$url" -o "$TMP_PAGE" 2>/dev/null
+rc=$?
+
+if [ "$rc" -ne 0 ] || [ ! -s "$TMP_PAGE" ]; then
+    rm -f "$TMP_PAGE" "$TMP_LINKS" "$TMP_TEXT" 2>/dev/null
+    json_error "502 Bad Gateway" "Failed to fetch ${url} (curl error ${rc})"
+fi
+
+title=$(grep -i '<title>' "$TMP_PAGE" 2>/dev/null | head -n 1 | sed -e 's/<[^>]*>//g' -e 's/^[ \t]*//' -e 's/[ \t]*$//')
+[ -z "$title" ] && title="$url"
+
+# Extract links and render text
+: > "$TMP_LINKS"
+sed -E \
+    -e '/<script/I,/<\/script>/Id' \
+    -e '/<style/I,/<\/style>/Id' \
+    -e '/<!--/,/-->/d' \
+    -e 's/<br\s*\/?>/\n/gI' \
+    -e 's/<\/(p|div|tr|h[1-6])>/\n\n/gI' \
+    -e 's/<li[^>]*>/\n  • /gI' \
+    -e 's/<hr[^>]*>/\n------------------------------------------------------------\n/gI' \
+    "$TMP_PAGE" | awk -v link_out="$TMP_LINKS" -v sq="'" -v dq="\"" '
+BEGIN { link_idx = 0 }
+{
+    line = $0
+    gsub(/&amp;/, "\\&", line); gsub(/&lt;/, "<", line); gsub(/&gt;/, ">", line)
+    gsub(/&quot;/, dq, line); gsub(/&#39;/, sq, line); gsub(/&nbsp;/, " ", line)
+
+    while (match(line, /<[aA][^>]*href=[^>]*>.*?<\/[aA]>/) || match(line, /<[aA][^>]*href=[^>]*>/)) {
+        m = substr(line, RSTART, RLENGTH)
+        href = ""
+        n = split(m, parts, /[hH][rR][eE][fF]=/)
+        if (n > 1) {
+            split(parts[2], val, /[ >]/)
+            href = val[1]
+            gsub(dq, "", href)
+            gsub(sq, "", href)
+        }
+        text = m
+        gsub(/<[^>]*>/, "", text)
+        if (length(text) == 0) text = href
+
+        if (length(href) > 0 && href !~ /^#/ && href !~ /^[jJ][aA][vV][aA][sS][cC][rR][iI][pP][tT]:/) {
+            link_idx++
+            print link_idx "\t" href "\t" text > link_out
+            rep = text " [" link_idx "]"
+        } else {
+            rep = text
+        }
+        line = substr(line, 1, RSTART - 1) rep substr(line, RSTART + RLENGTH)
+    }
+    gsub(/<[^>]*>/, "", line)
+    if (line ~ /[^ \t]/) print line
+}' > "$TMP_TEXT"
+
+# Build JSON response
+printf '{"ok":true,"url":"%s","title":"%s","links":[' \
+    "$(json_escape "$url")" \
+    "$(json_escape "$title")"
+
+first=1
+if [ -s "$TMP_LINKS" ]; then
+    while IFS="$(printf '\t')" read -r num href text; do
+        [ "$first" -eq 0 ] && printf ','
+        first=0
+        printf '{"num":%s,"url":"%s","text":"%s"}' \
+            "$num" "$(json_escape "$href")" "$(json_escape "$text")"
+    done < "$TMP_LINKS"
+fi
+
+printf '],"content":"%s"}\n' "$(head -n 200 "$TMP_TEXT" 2>/dev/null | tr '\n' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g')"
+
+rm -f "$TMP_PAGE" "$TMP_LINKS" "$TMP_TEXT" 2>/dev/null

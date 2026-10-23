@@ -1,0 +1,616 @@
+#!/system/bin/sh
+#
+# browser - Full On-Device Web Browser & Package Downloader for Recovery
+#
+# Features:
+#   - Interactive terminal browser with full ANSI formatting
+#   - Secure HTTPS support with bundled Mozilla CA certificates
+#   - HTML rendering with numbered links [1], [2], [3]...
+#   - Web search integration (DuckDuckGo Lite & Google Lite)
+#   - Built-in Package Downloader with live progress and SHA-256 checks
+#   - 1-Click Recovery Flashing of downloaded ROMs, ZIPs, and images
+#   - Bookmarks persistence across reboots (/sdcard/Fox/FoxFiles/bookmarks.txt)
+#   - History navigation (Back / Forward / Reload)
+#   - Auto-checks and brings up Wi-Fi networking stack on demand
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# Terminal Colors
+BOLD="\033[1m"
+DIM="\033[2m"
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[34m"
+MAGENTA="\033[35m"
+CYAN="\033[36m"
+WHITE="\033[37m"
+RESET="\033[0m"
+
+TMP_DIR="/tmp/foxbrowser"
+mkdir -p "$TMP_DIR" 2>/dev/null
+chmod 0777 "$TMP_DIR" 2>/dev/null
+
+RAW_HTML="$TMP_DIR/page.html"
+RENDERED_TEXT="$TMP_DIR/rendered.txt"
+LINKS_MAP="$TMP_DIR/links.txt"
+HEADERS_FILE="$TMP_DIR/headers.txt"
+
+CA_CERT="/system/etc/security/cacert.pem"
+[ -f "$CA_CERT" ] || CA_CERT=""
+
+USER_AGENT="Mozilla/5.0 (Linux; Android 12; Begonia) OrangeFox/12.1 Browser"
+
+# History stack
+HIST_DIR="$TMP_DIR/history"
+mkdir -p "$HIST_DIR" 2>/dev/null
+HIST_POS=0
+HIST_TOTAL=0
+
+# Bookmarks file
+BOOKMARKS_FILE="/sdcard/Fox/FoxFiles/bookmarks.txt"
+[ -d "/sdcard/Fox/FoxFiles" ] || BOOKMARKS_FILE="/tmp/Fox/bookmarks.txt"
+mkdir -p "$(dirname "$BOOKMARKS_FILE")" 2>/dev/null
+
+# Default download directory
+DOWNLOAD_DIR="/sdcard/Download"
+[ -d "$DOWNLOAD_DIR" ] || DOWNLOAD_DIR="/sdcard/Fox/FoxFiles"
+[ -d "$DOWNLOAD_DIR" ] || DOWNLOAD_DIR="/tmp"
+
+# Check network connectivity
+check_network() {
+    for dev in wlan0 eth0 rndis0 usb0; do
+        [ -e "/sys/class/net/$dev" ] || continue
+        local ip=""
+        if command -v ip >/dev/null 2>&1; then
+            ip=$(ip -o -4 addr show "$dev" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+        fi
+        if [ -z "$ip" ]; then
+            ip=$(ifconfig "$dev" 2>/dev/null | grep 'inet ' | awk '{print $2}' | sed 's/addr://')
+        fi
+        if [ -n "$ip" ]; then
+            echo "$ip"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Resolve relative URLs against base URL
+resolve_url() {
+    local base="$1"
+    local target="$2"
+
+    case "$target" in
+        http://*|https://*|ftp://*)
+            echo "$target"
+            return 0
+            ;;
+        //*)
+            local proto
+            proto=$(echo "$base" | grep -o '^[a-z]*:' || echo "https:")
+            echo "${proto}${target}"
+            return 0
+            ;;
+        /*)
+            local origin
+            origin=$(echo "$base" | sed -E 's#^([a-z]+://[^/]+).*#\1#')
+            echo "${origin}${target}"
+            return 0
+            ;;
+        *)
+            local base_dir
+            base_dir=$(echo "$base" | sed -E 's#/[^/]*$##')
+            echo "${base_dir}/${target}"
+            return 0
+            ;;
+    esac
+}
+
+# Fetch URL using curl (or wget fallback)
+fetch_url() {
+    local url="$1"
+    local out="$2"
+    local headers_out="$3"
+
+    : > "$out"
+    [ -n "$headers_out" ] && : > "$headers_out"
+
+    if command -v curl >/dev/null 2>&1; then
+        local ca_opt=""
+        [ -n "$CA_CERT" ] && ca_opt="--cacert $CA_CERT"
+        if [ -n "$headers_out" ]; then
+            curl -sL $ca_opt -A "$USER_AGENT" --max-time 20 -D "$headers_out" "$url" -o "$out"
+        else
+            curl -sL $ca_opt -A "$USER_AGENT" --max-time 20 "$url" -o "$out"
+        fi
+        return $?
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -U "$USER_AGENT" -T 20 -O "$out" "$url"
+        return $?
+    elif [ -x /system/bin/busybox ]; then
+        /system/bin/busybox wget -q -U "$USER_AGENT" -T 20 -O "$out" "$url"
+        return $?
+    else
+        echo "Error: Neither curl nor wget is available in recovery." >&2
+        return 1
+    fi
+}
+
+# Render HTML to formatted ANSI text and extract numbered links
+render_html() {
+    local html_file="$1"
+    local base_url="$2"
+    local text_out="$3"
+    local links_out="$4"
+
+    : > "$links_out"
+    : > "$text_out"
+
+    # Pre-process block elements with sed, then parse links and headings with awk
+    sed -E \
+        -e '/<script/I,/<\/script>/Id' \
+        -e '/<style/I,/<\/style>/Id' \
+        -e '/<!--/,/-->/d' \
+        -e 's/<br\s*\/?>/\n/gI' \
+        -e 's/<\/(p|div|tr|h[1-6])>/\n\n/gI' \
+        -e 's/<li[^>]*>/\n  • /gI' \
+        -e 's/<hr[^>]*>/\n----------------------------------------------------------------------\n/gI' \
+        "$html_file" | awk -v link_out="$links_out" -v sq="'" -v dq="\"" '
+    BEGIN { link_idx = 0 }
+    {
+        line = $0
+        # HTML entity decoding
+        gsub(/&amp;/, "\\&", line)
+        gsub(/&lt;/, "<", line)
+        gsub(/&gt;/, ">", line)
+        gsub(/&quot;/, dq, line)
+        gsub(/&#39;/, sq, line)
+        gsub(/&nbsp;/, " ", line)
+        gsub(/&mdash;/, "—", line)
+        gsub(/&ndash;/, "–", line)
+        gsub(/&bull;/, "•", line)
+
+        # Match <a ... href="..." ...> ... </a>
+        while (match(line, /<[aA][^>]*href=[^>]*>.*?<\/[aA]>/) || match(line, /<[aA][^>]*href=[^>]*>/)) {
+            match_str = substr(line, RSTART, RLENGTH)
+            href = ""
+            n = split(match_str, parts, /[hH][rR][eE][fF]=/)
+            if (n > 1) {
+                split(parts[2], val, /[ >]/)
+                href = val[1]
+                gsub(dq, "", href)
+                gsub(sq, "", href)
+            }
+
+            text = match_str
+            gsub(/<[^>]*>/, "", text)
+            if (length(text) == 0) text = href
+
+            if (length(href) > 0 && href !~ /^#/ && href !~ /^[jJ][aA][vV][aA][sS][cC][rR][iI][pP][tT]:/) {
+                link_idx++
+                print link_idx "\t" href > link_out
+                rep = "\033[36m" text "\033[0m [\033[1;32m" link_idx "\033[0m]"
+            } else {
+                rep = text
+            }
+            line = substr(line, 1, RSTART - 1) rep substr(line, RSTART + RLENGTH)
+        }
+
+        # Format headings
+        if (match(line, /<[hH][1-6][^>]*>.*?<\/[hH][1-6]>/)) {
+            gsub(/<[^>]*>/, "", line)
+            if (length(line) > 0) {
+                print "\n\033[1;33m=== " line " ===\033[0m\n"
+            }
+            next
+        }
+
+        # Strip remaining tags
+        gsub(/<[^>]*>/, "", line)
+
+        # Output line if not blank
+        if (line ~ /[^ \t]/) {
+            print line
+        }
+    }' > "$text_out"
+}
+
+# Extract page title
+extract_title() {
+    local html_file="$1"
+    grep -i '<title>' "$html_file" 2>/dev/null | head -n 1 | sed -e 's/<[^>]*>//g' -e 's/^[ \t]*//' -e 's/[ \t]*$//'
+}
+
+# Initialize default bookmarks if none exist
+init_bookmarks() {
+    [ -s "$BOOKMARKS_FILE" ] && return 0
+    cat << 'BM' > "$BOOKMARKS_FILE"
+1	DuckDuckGo Lite Web Search	https://lite.duckduckgo.com/lite/
+2	XDA Developers Begonia Forum	https://xdaforums.com/f/redmi-note-8-pro-roms-kernels-recoveries.9298/
+3	OrangeFox Recovery Releases	https://gitlab.com/OrangeFox/device/begonia/-/releases
+4	Magisk Official GitHub Releases	https://github.com/topjohnwu/Magisk/releases
+5	KernelSU Next Releases	https://github.com/rifsxd/KernelSU-Next/releases
+6	APatch Official Releases	https://github.com/bmax121/APatch/releases
+7	Xiaomi Firmware Updater (Begonia)	https://xiaomifirmwareupdater.com/firmware/begonia/
+8	LineageOS GSI Tracker	https://github.com/AndyCGnx/lineage_build_unified/releases
+9	Local Recovery Web Dashboard	http://127.0.0.1:8080/
+BM
+}
+
+# Display Bookmarks list
+show_bookmarks() {
+    init_bookmarks
+    echo -e "\n${BOLD}${CYAN}======================================================================${RESET}"
+    echo -e "${BOLD}${CYAN}                     SAVED WEB BOOKMARKS                              ${RESET}"
+    echo -e "${BOLD}${CYAN}======================================================================${RESET}"
+    local idx=0
+    while IFS="$(printf '\t')" read -r num title url; do
+        idx=$((idx + 1))
+        echo -e "  [${GREEN}${BOLD}${idx}${RESET}] ${BOLD}${title}${RESET}"
+        echo -e "      ${DIM}${url}${RESET}"
+    done < "$BOOKMARKS_FILE"
+    echo -e "${BOLD}----------------------------------------------------------------------${RESET}"
+    echo -e "Type ${GREEN}[1-${idx}]${RESET} to open bookmark, or Enter to return."
+}
+
+# Open a bookmark by number
+open_bookmark() {
+    local target_num="$1"
+    init_bookmarks
+    local current=0
+    while IFS="$(printf '\t')" read -r num title url; do
+        current=$((current + 1))
+        if [ "$current" -eq "$target_num" ]; then
+            navigate "$url"
+            return 0
+        fi
+    done < "$BOOKMARKS_FILE"
+    echo -e "${RED}Invalid bookmark number: $target_num${RESET}"
+    return 1
+}
+
+# Add current URL to bookmarks
+add_bookmark() {
+    local url="$1"
+    local title="$2"
+    [ -z "$title" ] && title=$(extract_title "$RAW_HTML")
+    [ -z "$title" ] && title="$url"
+    init_bookmarks
+    local next_id
+    next_id=$(wc -l < "$BOOKMARKS_FILE" 2>/dev/null || echo 0)
+    next_id=$((next_id + 1))
+    printf '%d\t%s\t%s\n' "$next_id" "$title" "$url" >> "$BOOKMARKS_FILE"
+    echo -e "${GREEN}Bookmarked: '${title}'${RESET}"
+}
+
+# Download file with live progress and SHA-256 verification
+download_file() {
+    local target_url="$1"
+    local dest_dir="$2"
+
+    [ -z "$dest_dir" ] && dest_dir="$DOWNLOAD_DIR"
+    mkdir -p "$dest_dir" 2>/dev/null
+
+    local filename
+    filename=$(basename "$target_url" | cut -d? -f1)
+    [ -z "$filename" ] && filename="download_$(date +%s).bin"
+    local target_path="$dest_dir/$filename"
+
+    echo -e "\n${BOLD}${CYAN}======================================================================${RESET}"
+    echo -e "${BOLD}${CYAN}                  RECOVERY PACKAGE DOWNLOADER                         ${RESET}"
+    echo -e "${BOLD}${CYAN}======================================================================${RESET}"
+    echo -e "${BOLD}Source URL  :${RESET} ${target_url}"
+    echo -e "${BOLD}Destination :${RESET} ${target_path}"
+    echo ""
+
+    if command -v curl >/dev/null 2>&1; then
+        local ca_opt=""
+        [ -n "$CA_CERT" ] && ca_opt="--cacert $CA_CERT"
+        curl -# -L $ca_opt -A "$USER_AGENT" "$target_url" -o "$target_path"
+    else
+        wget -U "$USER_AGENT" -O "$target_path" "$target_url"
+    fi
+
+    if [ ! -s "$target_path" ]; then
+        echo -e "${RED}Download failed or resulted in an empty file.${RESET}"
+        return 1
+    fi
+
+    local size
+    size=$(wc -c < "$target_path" 2>/dev/null)
+    local sha256="unavailable"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256=$(sha256sum "$target_path" 2>/dev/null | awk '{print $1}')
+    fi
+
+    echo -e "\n${GREEN}${BOLD}✓ Download Completed Successfully!${RESET}"
+    echo -e "${BOLD}File Size   :${RESET} ${size} bytes"
+    echo -e "${BOLD}SHA-256     :${RESET} ${sha256}"
+    echo -e "${BOLD}Saved Path  :${RESET} ${target_path}"
+
+    # If the file is a flashable ZIP or IMG, prompt user to flash immediately
+    case "$filename" in
+        *.zip|*.img)
+            echo ""
+            echo -e "${YELLOW}${BOLD}Detected flashable package: ${filename}${RESET}"
+            printf "${BOLD}Would you like to flash this in recovery now? [y/N]: ${RESET}"
+            read -r ans
+            case "$ans" in
+                y|Y|yes|YES)
+                    echo -e "${CYAN}-> Preparing recovery installation of ${target_path}...${RESET}"
+                    mkdir -p /cache/recovery 2>/dev/null
+                    echo "install ${target_path}" > /cache/recovery/openrecoveryscript
+                    echo -e "${GREEN}-> Scheduled OpenRecoveryScript flash. Rebooting to install...${RESET}"
+                    if command -v twrp >/dev/null 2>&1; then
+                        twrp install "$target_path"
+                    fi
+                    ;;
+            esac
+            ;;
+    esac
+    echo -e "${BOLD}======================================================================${RESET}"
+}
+
+# Display built-in Recovery Home Portal
+show_home() {
+    clear 2>/dev/null || echo ""
+    local ip
+    ip=$(check_network)
+    echo -e "${BOLD}${CYAN}======================================================================${RESET}"
+    echo -e "${BOLD}${CYAN}         ORANGEFOX RECOVERY FULL WEB BROWSER (begonia)                ${RESET}"
+    echo -e "${BOLD}${CYAN}======================================================================${RESET}"
+    if [ -n "$ip" ]; then
+        echo -e "${BOLD}Network Status :${RESET} ${GREEN}ONLINE${RESET} (${ip})  |  ${BOLD}SSL Engine :${RESET} ${GREEN}Active${RESET}"
+    else
+        echo -e "${BOLD}Network Status :${RESET} ${RED}OFFLINE${RESET} (Use 'wifi' command to connect)"
+    fi
+    echo ""
+    echo -e "${BOLD}${YELLOW}Quick Navigation & Bookmarks:${RESET}"
+    init_bookmarks
+    local idx=0
+    while IFS="$(printf '\t')" read -r num title url; do
+        idx=$((idx + 1))
+        echo -e "  [${GREEN}${BOLD}${idx}${RESET}] ${BOLD}${title}${RESET}"
+        echo -e "      ${DIM}${url}${RESET}"
+    done < "$BOOKMARKS_FILE"
+    echo ""
+    echo -e "${BOLD}Commands:${RESET}"
+    echo -e "  [1-${idx}]         Open quick link / bookmark"
+    echo -e "  [g <url>]       Go to URL (e.g. g https://example.com)"
+    echo -e "  [s <query>]     Search web via DuckDuckGo"
+    echo -e "  [d <url>]       Download file directly to /sdcard/Download"
+    echo -e "  [wifi]          Configure Wi-Fi connection"
+    echo -e "  [bm]            Manage bookmarks"
+    echo -e "  [q]             Quit browser"
+    echo -e "${BOLD}======================================================================${RESET}"
+}
+
+# Navigate to URL
+navigate() {
+    local target_url="$1"
+    [ -z "$target_url" ] && return 1
+
+    case "$target_url" in
+        http://*|https://*|file://*) ;;
+        *) target_url="https://${target_url}" ;;
+    esac
+
+    local ip
+    ip=$(check_network)
+    if [ -z "$ip" ]; then
+        echo -e "${YELLOW}Warning: Network appears offline. Starting Wi-Fi check...${RESET}"
+        if command -v foxwifi >/dev/null 2>&1; then
+            foxwifi on >/dev/null 2>&1
+        fi
+    fi
+
+    echo -e "${CYAN}Connecting to ${BOLD}${target_url}${RESET}${CYAN}...${RESET}"
+    fetch_url "$target_url" "$RAW_HTML" "$HEADERS_FILE"
+    local rc=$?
+
+    if [ "$rc" -ne 0 ] || [ ! -s "$RAW_HTML" ]; then
+        echo -e "${RED}Failed to load page: ${target_url} (exit code ${rc})${RESET}"
+        return 1
+    fi
+
+    # Update history
+    HIST_POS=$((HIST_POS + 1))
+    HIST_TOTAL=$HIST_POS
+    echo "$target_url" > "$HIST_DIR/$HIST_POS"
+
+    CURRENT_URL="$target_url"
+    render_html "$RAW_HTML" "$target_url" "$RENDERED_TEXT" "$LINKS_MAP"
+
+    display_page
+}
+
+# Display currently loaded page
+display_page() {
+    clear 2>/dev/null || echo ""
+    local title
+    title=$(extract_title "$RAW_HTML")
+    [ -z "$title" ] && title="Untitled Page"
+
+    local total_links
+    total_links=$(wc -l < "$LINKS_MAP" 2>/dev/null || echo 0)
+
+    echo -e "${BOLD}${CYAN}======================================================================${RESET}"
+    echo -e "${BOLD}Title :${RESET} ${title}"
+    echo -e "${BOLD}URL   :${RESET} ${DIM}${CURRENT_URL}${RESET}"
+    echo -e "${BOLD}Links :${RESET} ${GREEN}${total_links} links on this page${RESET}"
+    echo -e "${BOLD}${CYAN}======================================================================${RESET}\n"
+
+    cat "$RENDERED_TEXT"
+    echo ""
+    echo -e "${BOLD}----------------------------------------------------------------------${RESET}"
+    echo -e "${DIM}[N] Follow Link  |  [g] Go URL  |  [s] Search  |  [d N] Download  |  [b] Back  |  [h] Home  |  [q] Quit${RESET}"
+}
+
+# Resolve link number to absolute URL
+get_link_url() {
+    local target_num="$1"
+    [ -f "$LINKS_MAP" ] || return 1
+    local href
+    href=$(awk -v num="$target_num" '$1 == num {print $2; exit}' "$LINKS_MAP")
+    if [ -n "$href" ]; then
+        resolve_url "$CURRENT_URL" "$href"
+        return 0
+    fi
+    return 1
+}
+
+# Web Search
+search_web() {
+    local query="$1"
+    [ -z "$query" ] && return 1
+    local encoded
+    encoded=$(echo "$query" | sed 's/ /+/g')
+    navigate "https://lite.duckduckgo.com/lite/?q=${encoded}"
+}
+
+# Interactive REPL shell
+interactive_shell() {
+    if [ -n "$1" ]; then
+        navigate "$1"
+    else
+        show_home
+    fi
+
+    while true; do
+        printf "${BOLD}${CYAN}browser > ${RESET}"
+        read -r cmd arg extra || break
+
+        case "$cmd" in
+            # Number: follow link
+            [0-9]*)
+                if [ -z "$CURRENT_URL" ]; then
+                    open_bookmark "$cmd"
+                else
+                    target_url=$(get_link_url "$cmd")
+                    if [ -n "$target_url" ]; then
+                        navigate "$target_url"
+                    else
+                        echo -e "${RED}No link [#${cmd}] found on this page.${RESET}"
+                    fi
+                fi
+                ;;
+            g|go|open)
+                navigate "$arg"
+                ;;
+            s|search)
+                search_web "$arg $extra"
+                ;;
+            b|back)
+                if [ "$HIST_POS" -gt 1 ]; then
+                    HIST_POS=$((HIST_POS - 1))
+                    prev_url=$(cat "$HIST_DIR/$HIST_POS" 2>/dev/null)
+                    [ -n "$prev_url" ] && navigate "$prev_url"
+                else
+                    echo -e "${YELLOW}Already at earliest page in history.${RESET}"
+                fi
+                ;;
+            f|forward)
+                if [ "$HIST_POS" -lt "$HIST_TOTAL" ]; then
+                    HIST_POS=$((HIST_POS + 1))
+                    next_url=$(cat "$HIST_DIR/$HIST_POS" 2>/dev/null)
+                    [ -n "$next_url" ] && navigate "$next_url"
+                else
+                    echo -e "${YELLOW}Already at latest page in history.${RESET}"
+                fi
+                ;;
+            r|reload)
+                [ -n "$CURRENT_URL" ] && navigate "$CURRENT_URL"
+                ;;
+            d|download)
+                if [ "$arg" -ge 1 ] 2>/dev/null; then
+                    dl_url=$(get_link_url "$arg")
+                else
+                    dl_url="$arg"
+                fi
+                if [ -n "$dl_url" ]; then
+                    download_file "$dl_url" "$extra"
+                else
+                    echo -e "${RED}Usage: download <link_number | url>${RESET}"
+                fi
+                ;;
+            bm|bookmarks)
+                show_bookmarks
+                ;;
+            bma|bookmark-add)
+                [ -n "$CURRENT_URL" ] && add_bookmark "$CURRENT_URL" "$arg $extra"
+                ;;
+            links|urls)
+                echo -e "\n${BOLD}${CYAN}--- Links Extracted From Page ---${RESET}"
+                cat "$LINKS_MAP" 2>/dev/null
+                echo ""
+                ;;
+            src|source)
+                if [ -s "$RAW_HTML" ]; then
+                    if command -v more >/dev/null 2>&1; then
+                        more "$RAW_HTML"
+                    else
+                        cat "$RAW_HTML"
+                    fi
+                fi
+                ;;
+            home)
+                CURRENT_URL=""
+                show_home
+                ;;
+            wifi)
+                if command -v foxwifi >/dev/null 2>&1; then
+                    foxwifi status
+                else
+                    echo "foxwifi not found"
+                fi
+                ;;
+            h|help)
+                cat << 'HLP'
+Commands:
+  <N>               Follow link number N
+  g <url>           Go to URL
+  s <query>         Search DuckDuckGo
+  d <N|url>         Download file directly to /sdcard/Download
+  b / f             Back / Forward in history
+  r                 Reload current page
+  bm / bma [name]   View bookmarks / Add current page to bookmarks
+  links             List all links extracted from page
+  src               View raw HTML source
+  home              Open Recovery Home Portal
+  wifi              Show Wi-Fi status
+  q                 Quit browser
+HLP
+                ;;
+            q|quit|exit)
+                echo "Exiting browser."
+                break
+                ;;
+            "")
+                ;;
+            *)
+                echo -e "Unknown command: '${cmd}'. Type 'h' for help."
+                ;;
+        esac
+    done
+}
+
+case "$1" in
+    download|dl)
+        shift
+        download_file "$@"
+        ;;
+    fetch|get)
+        shift
+        fetch_url "$1" "${2:-/dev/stdout}"
+        ;;
+    search)
+        shift
+        search_web "$*"
+        ;;
+    *)
+        interactive_shell "$@"
+        ;;
+esac

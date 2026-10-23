@@ -1,0 +1,57 @@
+#!/system/bin/sh
+#
+# Direct File Downloader & Package Installer for FoxWeb
+#
+. /system/etc/foxwww/cgi-bin/lib.sh
+
+require_post
+require_token
+json_header
+
+read_body
+url=$(body_param url)
+dest_dir=$(body_param dest)
+
+if [ -z "$url" ]; then
+    json_error "400 Bad Request" "URL parameter is required"
+fi
+
+[ -z "$dest_dir" ] && dest_dir="/sdcard/Download"
+[ -d "$dest_dir" ] || dest_dir="/sdcard/Fox/FoxFiles"
+[ -d "$dest_dir" ] || dest_dir="/tmp"
+mkdir -p "$dest_dir" 2>/dev/null
+
+filename=$(basename "$url" | cut -d? -f1)
+[ -z "$filename" ] && filename="download_$(date +%s).bin"
+target_path="$dest_dir/$filename"
+
+CA_CERT="/system/etc/security/cacert.pem"
+[ -f "$CA_CERT" ] || CA_CERT=""
+ca_opt=""
+[ -n "$CA_CERT" ] && ca_opt="--cacert $CA_CERT"
+UA="Mozilla/5.0 (Linux; Android 12; Begonia) OrangeFox/12.1 Browser"
+
+curl -sL $ca_opt -A "$UA" --max-time 600 "$url" -o "$target_path" 2>/dev/null
+rc=$?
+
+if [ "$rc" -ne 0 ] || [ ! -s "$target_path" ]; then
+    json_error "502 Bad Gateway" "Download failed (curl code ${rc})"
+fi
+
+size=$(wc -c < "$target_path" 2>/dev/null || echo 0)
+sha256="unavailable"
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256=$(sha256sum "$target_path" 2>/dev/null | awk '{print $1}')
+fi
+
+flashable=false
+case "$filename" in
+    *.zip|*.img) flashable=true ;;
+esac
+
+printf '{"ok":true,"file":"%s","path":"%s","size":%s,"sha256":"%s","flashable":%s}\n' \
+    "$(json_escape "$filename")" \
+    "$(json_escape "$target_path")" \
+    "$size" \
+    "$sha256" \
+    "$flashable"
