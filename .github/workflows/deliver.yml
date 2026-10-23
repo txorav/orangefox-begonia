@@ -1,0 +1,173 @@
+name: Deliver OrangeFox Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Run ID to deliver'
+        required: false
+        default: '39992577944'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Artifacts from Target Run
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          mkdir -p delivered_artifacts
+          TARGET_RUN="${{ github.event.inputs.run_id }}"
+          echo "Downloading artifacts from run: $TARGET_RUN"
+          gh run download "$TARGET_RUN" -R "${{ github.repository }}" -D delivered_artifacts/
+          echo "Downloaded contents:"
+          find delivered_artifacts/ -type f -exec ls -lh {} +
+
+      - name: Create GitHub Release with Direct Cloud Download
+        id: create_release
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          TAG="R12.0-begonia-$(date +%Y%m%d-%H%M)"
+          FILES=$(find delivered_artifacts/ -type f \( -name "*.zip" -o -name "*.img" \))
+          echo "Release files: $FILES"
+          gh release create "$TAG" $FILES \
+            --repo "${{ github.repository }}" \
+            --title "OrangeFox Recovery R12.0 - Begonia ($TAG)" \
+            --notes "OrangeFox Recovery R12.0 for Redmi Note 8 Pro (begonia)
+            
+- Source Build Run: ${{ github.event.inputs.run_id }}
+- Decryption: FBE v1 aes-256-cts:v1 supported
+- Flashlight: /sys/class/leds/torch-light0 node
+- Wi-Fi: Native wpa_supplicant built
+- Root Manager: APatch & Magisk detection enabled"
+          echo "release_tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Upload to Gofile, Litterbox & Notify Telegram
+        env:
+          GOFILE_TOKEN: 'IoC222lPjhLcrkCYcgVLdo7OkQRDW201'
+          TELEGRAM_BOT_TOKEN: '8477945979:AAGTYiUAfnPjQFpkh576D7Xsqm0RDQJr_As'
+          TELEGRAM_CHAT_ID: '8198896729'
+          RECOVERY_FLAVOR: 'OrangeFox'
+          RUN_ID: ${{ github.event.inputs.run_id }}
+          RELEASE_TAG: ${{ steps.create_release.outputs.release_tag }}
+        run: |
+          python3 - << 'EOF'
+          import os, sys, glob, json, subprocess, urllib.request
+
+          tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "")
+          gofile_token = os.environ.get("GOFILE_TOKEN", "")
+          flavor = os.environ.get("RECOVERY_FLAVOR", "OrangeFox")
+          run_id = os.environ.get("RUN_ID", "")
+          repo = os.environ.get("GITHUB_REPOSITORY", "txorav/orangefox-begonia")
+          rel_tag = os.environ.get("RELEASE_TAG", "")
+
+          def send_tg(text):
+              if not tg_token or not tg_chat:
+                  print("No Telegram credentials configured")
+                  return
+              data = json.dumps({"chat_id": tg_chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}).encode("utf-8")
+              req = urllib.request.Request(f"https://api.telegram.org/bot{tg_token}/sendMessage", data=data, headers={"Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      print("Telegram response:", r.read().decode())
+              except Exception as e:
+                  print("Telegram send error:", e)
+
+          # Find files
+          files = []
+          for root, _, filenames in os.walk("delivered_artifacts"):
+              for fn in filenames:
+                  if fn.endswith((".zip", ".img")) and not fn.startswith("actual_artifact"):
+                      files.append(os.path.join(root, fn))
+
+          print(f"Target files: {files}")
+          if not files:
+              send_tg(f"⚠️ No artifacts found for run {run_id}")
+              sys.exit(0)
+
+          # Fetch Gofile servers
+          servers = ["store-na-phx-1", "store6", "store3", "store1"]
+          try:
+              req = urllib.request.Request("https://api.gofile.io/servers", headers={"Authorization": f"Bearer {gofile_token}"})
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  sdata = json.loads(r.read().decode("utf-8"))
+                  if sdata.get("status") == "ok":
+                      servers = [s["name"] for s in sdata.get("data", {}).get("servers", [])] + servers
+          except Exception as e:
+              print("Failed fetching servers:", e)
+
+          links = []
+          for f in files:
+              fname = os.path.basename(f)
+              fsize = f"{os.path.getsize(f) / (1024*1024):.1f}MB"
+              mirror_links = []
+
+              # GitHub Release direct link
+              if rel_tag:
+                  gh_dl = f"https://github.com/{repo}/releases/download/{rel_tag}/{fname}"
+                  mirror_links.append(f'🐙 <a href="{gh_dl}">GitHub Direct</a>')
+
+              # Gofile upload
+              gofile_dl = None
+              for srv in servers[:3]:
+                  print(f"Uploading {fname} ({fsize}) to Gofile server {srv}...")
+                  cmd = f'curl -sSL --http1.1 --connect-timeout 30 --max-time 600 -X POST "https://{srv}.gofile.io/contents/uploadfile" -H "Authorization: Bearer {gofile_token}" -F "file=@{f}"'
+                  try:
+                      res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, text=True, timeout=660)
+                      out = res.stdout
+                      if out:
+                          j = json.loads(out)
+                          if j.get("status") == "ok":
+                              gofile_dl = j["data"]["downloadPage"]
+                              print(f"Gofile success on {srv}: {gofile_dl}")
+                              break
+                  except Exception as e:
+                      print(f"Gofile server {srv} failed: {e}")
+
+              # Litterbox upload (72h temporary direct mirror)
+              lb_dl = None
+              try:
+                  print(f"Mirroring {fname} to Litterbox...")
+                  cmd_lb = f'curl -sSL --connect-timeout 30 --max-time 600 -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@{f}" https://litterbox.catbox.moe/resources/internals/api.php'
+                  res_lb = subprocess.run(cmd_lb, shell=True, stdout=subprocess.PIPE, text=True, timeout=660)
+                  out_lb = res_lb.stdout.strip()
+                  if out_lb.startswith("http"):
+                      lb_dl = out_lb
+                      print(f"Litterbox success: {lb_dl}")
+              except Exception as e:
+                  print(f"Litterbox failed: {e}")
+
+              if gofile_dl:
+                  mirror_links.append(f'📂 <a href="{gofile_dl}">Gofile</a>')
+              if lb_dl:
+                  mirror_links.append(f'⚡ <a href="{lb_dl}">Litterbox (Direct)</a>')
+
+              if mirror_links:
+                  links.append(f"📦 <b>{fname}</b> ({fsize}):\n" + " | ".join(mirror_links))
+              else:
+                  links.append(f"⚠️ <b>{fname}</b> ({fsize}) - Upload error")
+
+          msg = (
+              f"🎉 <b>{flavor} Verified Artifacts Ready!</b>\n\n"
+              f"📱 <b>Device:</b> Redmi Note 8 Pro (<code>begonia</code>)\n"
+              f"⏱ <b>Source Run:</b> <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">{run_id}</a>\n"
+              f"✨ <b>Fixes Included:</b>\n"
+              f"  • Flashlight (<code>/sys/class/leds/torch-light0</code>)\n"
+              f"  • FBE v1 Decryption (<code>aes-256-cts:v1</code>)\n"
+              f"  • Wi-Fi (Native <code>wpa_supplicant</code>)\n"
+              f"  • APatch & Magisk Detection\n\n"
+              + "\n\n".join(links) +
+              "\n\n🚀 <i>Fast direct download ready! Flash via recovery or fastboot.</i>"
+          )
+          send_tg(msg)
+          print("All notifications sent successfully!")
+          EOF
