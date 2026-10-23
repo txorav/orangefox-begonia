@@ -1,0 +1,79 @@
+#!/system/bin/sh
+#
+# CGI endpoint: OpenCode In-RAM Studio Manager
+#
+
+. ./lib.sh 2>/dev/null || . /system/etc/foxwww/cgi-bin/lib.sh
+
+json_header
+
+ACTION=""
+if [ "$REQUEST_METHOD" = "POST" ]; then
+    read_body
+    ACTION=$(param action)
+fi
+
+PID_FILE="/tmp/opencode/opencode_server.pid"
+RAM_DIR="/tmp/opencode"
+
+if [ -n "$ACTION" ]; then
+    check_token || exit 0
+    case "$ACTION" in
+        start_web)
+            /system/bin/opencode web 4096 >/dev/null 2>&1 &
+            sleep 1
+            printf '{"ok":true,"action":"start_web","message":"OpenCode web studio started on port 4096"}\n'
+            exit 0
+            ;;
+        stop_web)
+            if [ -f "$PID_FILE" ]; then
+                pid=$(cat "$PID_FILE" 2>/dev/null)
+                [ -n "$pid" ] && kill "$pid" 2>/dev/null
+                rm -f "$PID_FILE"
+            fi
+            printf '{"ok":true,"action":"stop_web","message":"OpenCode web studio stopped"}\n'
+            exit 0
+            ;;
+        clean)
+            /system/bin/opencode clean >/dev/null 2>&1
+            printf '{"ok":true,"action":"clean","message":"RAM-disk unmounted and memory released"}\n'
+            exit 0
+            ;;
+        *)
+            fail "invalid action"
+            exit 0
+            ;;
+    esac
+fi
+
+MOUNTED="false"
+RAM_USAGE="0 MB"
+if grep -q " $RAM_DIR " /proc/mounts 2>/dev/null; then
+    MOUNTED="true"
+    RAM_USAGE=$(df -h "$RAM_DIR" 2>/dev/null | tail -n 1 | awk '{print $3 " / " $2}')
+fi
+
+WEB_ACTIVE="false"
+WEB_PID=0
+if [ -f "$PID_FILE" ]; then
+    pid=$(cat "$PID_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        WEB_ACTIVE="true"
+        WEB_PID="$pid"
+    fi
+fi
+
+INSTALLED="false"
+if [ -x "$RAM_DIR/bin/opencode" ] || [ -x "$RAM_DIR/alpine/usr/bin/opencode" ]; then
+    INSTALLED="true"
+fi
+
+IP=""
+for dev in wlan0 eth0 rndis0 usb0; do
+    [ -e "/sys/class/net/$dev" ] || continue
+    IP=$(ip -o -4 addr show "$dev" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+    [ -n "$IP" ] && break
+done
+
+printf '{"ok":true,"mounted":%s,"ram_usage":"%s","installed":%s,"web_active":%s,"web_pid":%s,"web_port":4096,"ip":"%s","web_url":"http://%s:4096/"}\n' \
+    "$MOUNTED" "$RAM_USAGE" "$INSTALLED" "$WEB_ACTIVE" "$WEB_PID" "$IP" "$IP"

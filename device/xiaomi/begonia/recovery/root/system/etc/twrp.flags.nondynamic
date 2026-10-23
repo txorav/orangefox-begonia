@@ -8,11 +8,11 @@
 /vbmeta           emmc     /dev/block/platform/bootdevice/by-name/vbmeta       flags=backup=1;display="VBMeta";flashimg=1
 
 # Non-volatile calibration & protection
-/nvcfg            ext4     /dev/block/platform/bootdevice/by-name/nvcfg        flags=backup=1;display="NVCFG"
-/nvdata           ext4     /dev/block/platform/bootdevice/by-name/nvdata       flags=backup=1;display="NVDATA"
-/nvram            emmc     /dev/block/platform/bootdevice/by-name/nvram        flags=backup=1;display="NVRAM"
-/protect_f        ext4     /dev/block/platform/bootdevice/by-name/protect1     flags=backup=1;display="Protect F"
-/protect_s        ext4     /dev/block/platform/bootdevice/by-name/protect2     flags=backup=1;display="Protect S"
+/nvdata           ext4     /dev/block/platform/bootdevice/by-name/nvdata       flags=backup=1;display="IMEI & NVRAM"
+/nvcfg            ext4     /dev/block/platform/bootdevice/by-name/nvcfg        flags=backup=1;subpartitionof=/nvdata
+/nvram            emmc     /dev/block/platform/bootdevice/by-name/nvram        flags=backup=1;subpartitionof=/nvdata
+/protect_f        ext4     /dev/block/platform/bootdevice/by-name/protect1     flags=backup=1;subpartitionof=/nvdata
+/protect_s        ext4     /dev/block/platform/bootdevice/by-name/protect2     flags=backup=1;subpartitionof=/nvdata
 
 /metadata         ext4     /dev/block/platform/bootdevice/by-name/metadata     flags=backup=1;display="Metadata"
 /persist          ext4     /dev/block/platform/bootdevice/by-name/persist      flags=backup=1;display="Persist"
@@ -25,5 +25,6 @@
 /vendor_image     emmc     /dev/block/platform/bootdevice/by-name/vendor       flags=backup=1;display="Vendor Image";flashimg=1
 
 # External storage
-/external_sd      vfat     /dev/block/mmcblk0p1  /dev/block/mmcblk0            flags=display="MicroSD";storage;wipeingui;removable;fsflags="utf8"
-/usbstorage       vfat     /dev/block/sdd1  /dev/block/sdd                     flags=display="USB Storage";storage;wipeingui;removable;fsflags="utf8"
+/external_sd      auto     /dev/block/mmcblk1p1  /dev/block/mmcblk1            flags=display="MicroSD";storage;wipeingui;removable;fsflags="utf8"
+/usb_otg          auto     /dev/block/sda1  /dev/block/sda                     flags=display="USB-OTG";storage;wipeingui;removable;fsflags="utf8"
+/usbstorage       auto     /dev/block/sda1  /dev/block/sda                     flags=display="USB Storage";subpartitionof=/usb_otg

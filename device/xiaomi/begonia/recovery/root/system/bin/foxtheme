@@ -1,0 +1,163 @@
+#!/system/bin/sh
+#
+# foxtheme - Theme Manager & Palette Switcher for OrangeFox Recovery (begonia)
+#
+# Supports instant switching between 8 custom theme styles in recovery
+# and persistent storage in /Fox/theme and /sdcard/Fox/FoxFiles/theme.
+#
+# Usage:
+#   foxtheme                       Show current theme & interactive selector
+#   foxtheme list                  List all available theme styles
+#   foxtheme set <THEME_NAME>      Activate a theme preset
+#   foxtheme current               Show active theme name
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+THEMES_DIR="/system/etc/fox_themes"
+ACTIVE_THEME_FILE="/tmp/Fox/active_theme"
+PERSIST_THEME_FILE="/sdcard/Fox/FoxFiles/active_theme"
+FOX_THEME_DIR="/Fox/theme"
+TMP_THEME_DIR="/tmp/Fox/theme"
+
+BOLD="\033[1m"
+RESET="\033[0m"
+ORANGE="\033[38;5;208m"
+CYAN="\033[36m"
+RED="\033[31m"
+GREEN="\033[32m"
+PURPLE="\033[35m"
+BLUE="\033[34m"
+DIM="\033[2m"
+
+ensure_dirs() {
+    mkdir -p "$FOX_THEME_DIR" "$TMP_THEME_DIR" "/tmp/Fox" 2>/dev/null
+    [ -d "/sdcard/Fox/FoxFiles" ] && mkdir -p "/sdcard/Fox/FoxFiles/theme" 2>/dev/null
+}
+
+get_current() {
+    if [ -f "$ACTIVE_THEME_FILE" ]; then
+        cat "$ACTIVE_THEME_FILE" 2>/dev/null
+    elif [ -f "$PERSIST_THEME_FILE" ]; then
+        cat "$PERSIST_THEME_FILE" 2>/dev/null
+    else
+        echo "orangefox_classic"
+    fi
+}
+
+list_themes() {
+    printf "%b\n" "${BOLD}Available OrangeFox Themes (begonia):${RESET}"
+    printf "%b\n" "  ${ORANGE}1. orangefox_classic${RESET} - Signature OrangeFox Vibrant Orange & Charcoal"
+    printf "%b\n" "  ${BOLD}2. amoled_black${RESET}      - Pure Pitch Black (#000000) for OLED Displays"
+    printf "%b\n" "  ${CYAN}3. cyberpunk_neon${RESET}    - High-Tech Neon Cyan (#00f3ff) & Hot Pink"
+    printf "%b\n" "  ${BLUE}4. nord_frost${RESET}        - Arctic Cold Slate & Frozen Blue (#88c0d0)"
+    printf "%b\n" "  ${RED}5. crimson_flame${RESET}     - Deep Blood Red & Stealth Obsidian (#141414)"
+    printf "%b\n" "  ${PURPLE}6. dracula_purple${RESET}   - Gothic Dracula Vampire Purple (#bd93f9)"
+    printf "%b\n" "  ${GREEN}7. matrix_hacker${RESET}     - Phosphor Terminal Matrix Green (#00ff66)"
+    printf "%b\n" "  ${BLUE}8. hyperos_blue${RESET}      - Xiaomi HyperOS / MIUI Cobalt Blue (#007aff)"
+    echo ""
+    local cur=$(get_current)
+    printf "%b\n" "Active Theme: ${BOLD}${GREEN}$cur${RESET}"
+}
+
+set_theme() {
+    local target="$1"
+    ensure_dirs
+
+    case "$target" in
+        1|orange|classic|orangefox_classic)
+            target="orangefox_classic"
+            accent="#ff7a18"
+            bg="#101114"
+            card="#1b1e24"
+            ;;
+        2|black|amoled|amoled_black)
+            target="amoled_black"
+            accent="#ffffff"
+            bg="#000000"
+            card="#0a0a0a"
+            ;;
+        3|cyber|neon|cyberpunk|cyberpunk_neon)
+            target="cyberpunk_neon"
+            accent="#00f3ff"
+            bg="#080812"
+            card="#121324"
+            ;;
+        4|nord|frost|nord_frost)
+            target="nord_frost"
+            accent="#88c0d0"
+            bg="#242933"
+            card="#2e3440"
+            ;;
+        5|red|crimson|crimson_flame)
+            target="crimson_flame"
+            accent="#e63946"
+            bg="#0f0c0d"
+            card="#1c1416"
+            ;;
+        6|dracula|purple|dracula_purple)
+            target="dracula_purple"
+            accent="#bd93f9"
+            bg="#181528"
+            card="#282a36"
+            ;;
+        7|matrix|green|matrix_hacker)
+            target="matrix_hacker"
+            accent="#00ff66"
+            bg="#050a05"
+            card="#0a140a"
+            ;;
+        8|blue|hyperos|miui|hyperos_blue)
+            target="hyperos_blue"
+            accent="#007aff"
+            bg="#0e131d"
+            card="#161f30"
+            ;;
+        *)
+            echo "foxtheme: unknown theme '$target'"
+            echo "Run 'foxtheme list' to view available styles."
+            return 1
+            ;;
+    esac
+
+    # Save active theme tokens
+    echo "$target" > "$ACTIVE_THEME_FILE"
+    [ -d "/sdcard/Fox/FoxFiles" ] && echo "$target" > "$PERSIST_THEME_FILE" 2>/dev/null
+
+    # Generate theme prop configuration
+    cat <<EOF > "$TMP_THEME_DIR/theme.prop"
+# OrangeFox Begonia Custom Theme Profile
+theme.name=$target
+theme.accent=$accent
+theme.bg=$bg
+theme.card=$card
+theme.version=2.0
+theme.author=txorav
+EOF
+    cp -f "$TMP_THEME_DIR/theme.prop" "$FOX_THEME_DIR/theme.prop" 2>/dev/null
+    [ -d "/sdcard/Fox/FoxFiles/theme" ] && cp -f "$TMP_THEME_DIR/theme.prop" "/sdcard/Fox/FoxFiles/theme/theme.prop" 2>/dev/null
+
+    # Set Android/Recovery system properties
+    setprop persist.fox.theme "$target" 2>/dev/null
+    setprop ro.fox.theme.accent "$accent" 2>/dev/null
+
+    printf "%b\n" "${GREEN}>>> Successfully activated theme: ${BOLD}$target${RESET}"
+    printf "%b\n" "    Accent: ${BOLD}$accent${RESET} | Background: $bg | Surface: $card"
+}
+
+case "$1" in
+    ""|status|current)
+        echo "$(get_current)"
+        ;;
+    list|--list|-l)
+        list_themes
+        ;;
+    set)
+        shift
+        set_theme "$1"
+        ;;
+    *)
+        set_theme "$1"
+        ;;
+esac

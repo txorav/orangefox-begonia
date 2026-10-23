@@ -16,9 +16,21 @@
       <p>OrangeFox recovery &middot; begonia</p>
     </div>
   </div>
-  <div id="statusPill" class="pill off">
-    <span class="dot"></span>
-    <span id="statusText">Checking&hellip;</span>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <select id="themeSelector" style="background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:6px 12px; font-size:13px; font-weight:600; cursor:pointer;">
+      <option value="orangefox_classic">🎨 Fox Orange</option>
+      <option value="amoled_black">🖤 AMOLED Black</option>
+      <option value="cyberpunk_neon">⚡ Cyberpunk Neon</option>
+      <option value="nord_frost">❄️ Nordic Frost</option>
+      <option value="crimson_flame">🔥 Crimson Flame</option>
+      <option value="dracula_purple">🧛 Dracula Purple</option>
+      <option value="matrix_hacker">💻 Matrix Green</option>
+      <option value="hyperos_blue">💠 HyperOS Blue</option>
+    </select>
+    <div id="statusPill" class="pill off">
+      <span class="dot"></span>
+      <span id="statusText">Checking&hellip;</span>
+    </div>
   </div>
 </header>
 
@@ -190,6 +202,47 @@
     </div>
     <p class="muted small">Dynamically loads hardware stacks (SIM/RIL baseband, IMEI decoders, Wi-Fi, sensors, storage tools) into RAM during recovery without modifying system or vendor partitions.</p>
     <ul id="recmodList" class="networks" style="margin-top:14px;"></ul>
+  </section>
+
+  <section class="card" id="layoutCard">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Partition Architecture</p>
+        <h2>Unified Partition Switcher</h2>
+      </div>
+      <span id="layoutPill" class="pill good"><span class="dot"></span><span id="activeLayoutName">Auto-Detecting...</span></span>
+    </div>
+    <div class="metrics">
+      <div><span>Active Layout</span><strong id="layoutModeDisplay">&mdash;</strong></div>
+      <div><span>Super Partition</span><strong id="superBlockDisplay">&mdash;</strong></div>
+      <div><span>Logical Mounts</span><strong id="logicalStateDisplay">&mdash;</strong></div>
+    </div>
+    <p class="muted small" style="margin-top:10px;">Hot-swaps recovery.fstab and twrp.flags between retrofitted dynamic super (Android 11&ndash;15 custom ROMs) and physical by-name partitions (MIUI / Android 9&ndash;10).</p>
+    <div class="actions" style="margin-top:12px; gap:8px; display:flex;">
+      <button id="btnSwitchDynamic" class="ghost small">Switch to Dynamic (Super)</button>
+      <button id="btnSwitchNondynamic" class="ghost small">Switch to Non-Dynamic (Physical)</button>
+    </div>
+  </section>
+
+  <section class="card" id="opencodeCard">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">AI Assistant &amp; Storage</p>
+        <h2>OpenCode In-RAM Studio</h2>
+      </div>
+      <span id="opencodePill" class="pill off"><span class="dot"></span><span id="opencodeState">Checking...</span></span>
+    </div>
+    <div class="metrics">
+      <div><span>RAM Disk (/tmp)</span><strong id="opencodeRamDisplay">&mdash;</strong></div>
+      <div><span>Storage Access</span><strong id="opencodeStorageDisplay">Root (UID 0)</strong></div>
+      <div><span>Web Studio Port</span><strong id="opencodePortDisplay">4096</strong></div>
+    </div>
+    <p class="muted small" style="margin-top:10px;">Runs autonomous AI coding assistant entirely in RAM with root read/write access to /data, /sdcard, /system, and /vendor partitions.</p>
+    <div class="actions" style="margin-top:12px; gap:8px; display:flex; flex-wrap:wrap; align-items:center;">
+      <button id="btnStartOpenCode" class="primary small">Launch OpenCode Studio</button>
+      <a id="btnOpenStudioLink" href="#" target="_blank" class="ghost small" style="display:none; text-decoration:none; padding:7px 14px; border-radius:10px; background:var(--card-hi);">Open Studio Web UI &rarr;</a>
+      <button id="btnCleanOpenCode" class="ghost small danger">Release RAM</button>
+    </div>
   </section>
 
   <section class="card">

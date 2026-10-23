@@ -1,0 +1,32 @@
+#!/system/bin/sh
+#
+# CGI endpoint: OrangeFox Recovery & FoxWeb Theme Switcher
+#
+
+. ./lib.sh 2>/dev/null || . /system/etc/foxwww/cgi-bin/lib.sh
+
+json_header
+
+ACTION=""
+THEME_NAME=""
+if [ "$REQUEST_METHOD" = "POST" ]; then
+    read_body
+    ACTION=$(param action)
+    THEME_NAME=$(param theme)
+fi
+
+if [ "$ACTION" = "set" ] && [ -n "$THEME_NAME" ]; then
+    check_token || exit 0
+    /system/bin/foxtheme set "$THEME_NAME" >/dev/null 2>&1
+    printf '{"ok":true,"action":"set","theme":"%s","message":"Theme set to %s"}\n' "$THEME_NAME" "$THEME_NAME"
+    exit 0
+fi
+
+CURRENT=$(/system/bin/foxtheme current 2>/dev/null)
+[ -n "$CURRENT" ] || CURRENT="orangefox_classic"
+
+if [ -f "/system/etc/fox_themes/themes.json" ]; then
+    cat "/system/etc/fox_themes/themes.json"
+else
+    printf '{"ok":true,"current":"%s"}\n' "$CURRENT"
+fi

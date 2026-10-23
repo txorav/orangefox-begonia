@@ -1152,9 +1152,101 @@
     }
   });
 
+  // --- Theme Management ---
+  function initTheme() {
+    const sel = $('#themeSelector');
+    if (!sel) return;
+    const saved = localStorage.getItem('fox_theme') || 'orangefox_classic';
+    document.documentElement.setAttribute('data-theme', saved);
+    sel.value = saved;
+    sel.addEventListener('change', () => {
+      const chosen = sel.value;
+      document.documentElement.setAttribute('data-theme', chosen);
+      localStorage.setItem('fox_theme', chosen);
+      api('/cgi-bin/theme', {
+        method: 'POST',
+        body: new URLSearchParams({ action: 'set', theme: chosen })
+      }).catch(() => {});
+      toast(`Theme switched to ${sel.options[sel.selectedIndex].text}`, 'good');
+    });
+  }
+
+  // --- Unified Partition Layout Switcher ---
+  async function loadLayout() {
+    try {
+      const res = await api('/cgi-bin/layout');
+      const isDyn = res.is_dynamic;
+      $('#layoutModeDisplay').textContent = isDyn ? 'Dynamic (Super)' : 'Non-Dynamic (Physical)';
+      $('#activeLayoutName').textContent = isDyn ? 'Dynamic Super' : 'Non-Dynamic Physical';
+      $('#layoutPill').className = isDyn ? 'pill good' : 'pill';
+      $('#superBlockDisplay').textContent = res.super_detected ? 'Present (Offset 4096: gDal)' : 'Physical ext4';
+      $('#logicalStateDisplay').textContent = isDyn ? 'Mapped in super' : 'Disabled (By-Name)';
+    } catch(e) {}
+  }
+
+  $('#btnSwitchDynamic')?.addEventListener('click', async () => {
+    if (!confirm('Switch active recovery layout to Dynamic Super? Recovery interface will reload.')) return;
+    try {
+      await api('/cgi-bin/layout', { method: 'POST', body: new URLSearchParams({ action: 'dynamic' }) });
+      toast('Switched to Dynamic layout. Reloading...', 'good');
+      setTimeout(loadLayout, 1500);
+    } catch(e) { toast(e.message, 'bad'); }
+  });
+
+  $('#btnSwitchNondynamic')?.addEventListener('click', async () => {
+    if (!confirm('Switch active recovery layout to Physical Non-Dynamic? Recovery interface will reload.')) return;
+    try {
+      await api('/cgi-bin/layout', { method: 'POST', body: new URLSearchParams({ action: 'nondynamic' }) });
+      toast('Switched to Non-Dynamic layout. Reloading...', 'good');
+      setTimeout(loadLayout, 1500);
+    } catch(e) { toast(e.message, 'bad'); }
+  });
+
+  // --- OpenCode In-RAM Studio ---
+  async function loadOpenCode() {
+    try {
+      const res = await api('/cgi-bin/opencode');
+      $('#opencodeRamDisplay').textContent = res.mounted ? res.ram_usage : 'Not Mounted';
+      if (res.web_active) {
+        $('#opencodeState').textContent = 'Studio Active';
+        $('#opencodePill').className = 'pill good';
+        $('#btnStartOpenCode').textContent = 'Studio Running';
+        const link = $('#btnOpenStudioLink');
+        link.href = res.web_url;
+        link.style.display = 'inline-block';
+      } else {
+        $('#opencodeState').textContent = res.installed ? 'Ready to launch' : 'Idle';
+        $('#opencodePill').className = 'pill off';
+        $('#btnStartOpenCode').textContent = 'Launch OpenCode Studio';
+        $('#btnOpenStudioLink').style.display = 'none';
+      }
+    } catch(e) {}
+  }
+
+  $('#btnStartOpenCode')?.addEventListener('click', async () => {
+    try {
+      await api('/cgi-bin/opencode', { method: 'POST', body: new URLSearchParams({ action: 'start_web' }) });
+      toast('OpenCode Studio launched on port 4096!', 'good');
+      setTimeout(loadOpenCode, 1500);
+    } catch(e) { toast(e.message, 'bad'); }
+  });
+
+  $('#btnCleanOpenCode')?.addEventListener('click', async () => {
+    if (!confirm('Release RAM and unmount OpenCode tmpfs disk?')) return;
+    try {
+      await api('/cgi-bin/opencode', { method: 'POST', body: new URLSearchParams({ action: 'clean' }) });
+      toast('OpenCode RAM disk released', 'good');
+      setTimeout(loadOpenCode, 1000);
+    } catch(e) { toast(e.message, 'bad'); }
+  });
+
+  initTheme();
   renderWebQr();
   loadRootModules();
   loadRecmod();
+  loadLayout();
+  loadOpenCode();
+
   if (token.get()) {
     loadFiles(state.files.path).catch(() => { /* the file card shows the error */ });
   } else {

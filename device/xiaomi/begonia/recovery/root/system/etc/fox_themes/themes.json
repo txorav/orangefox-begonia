@@ -1,0 +1,12 @@
+{
+  "themes": [
+    { "id": "orangefox_classic", "name": "OrangeFox Classic", "accent": "#ff7a18", "bg": "#101114", "card": "#1b1e24" },
+    { "id": "amoled_black", "name": "AMOLED Pitch Black", "accent": "#ffffff", "bg": "#000000", "card": "#0a0a0a" },
+    { "id": "cyberpunk_neon", "name": "Cyberpunk Neon", "accent": "#00f3ff", "bg": "#080812", "card": "#121324" },
+    { "id": "nord_frost", "name": "Nordic Frost", "accent": "#88c0d0", "bg": "#242933", "card": "#2e3440" },
+    { "id": "crimson_flame", "name": "Crimson Flame", "accent": "#e63946", "bg": "#0f0c0d", "card": "#1c1416" },
+    { "id": "dracula_purple", "name": "Dracula Vampire", "accent": "#bd93f9", "bg": "#181528", "card": "#282a36" },
+    { "id": "matrix_hacker", "name": "Matrix Phosphor", "accent": "#00ff66", "bg": "#050a05", "card": "#0a140a" },
+    { "id": "hyperos_blue", "name": "HyperOS Cobalt Blue", "accent": "#007aff", "bg": "#0e131d", "card": "#161f30" }
+  ]
+}

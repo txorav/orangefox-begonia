@@ -16,6 +16,86 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+[data-theme="amoled_black"] {
+  --bg: #000000;
+  --bg-soft: #050505;
+  --card: #0c0c0c;
+  --card-hi: #161616;
+  --line: #222222;
+  --text: #ffffff;
+  --muted: #888888;
+  --accent: #ffffff;
+  --accent-soft: rgba(255, 255, 255, 0.15);
+}
+[data-theme="cyberpunk_neon"] {
+  --bg: #070714;
+  --bg-soft: #0e0e24;
+  --card: #141432;
+  --card-hi: #1c1c45;
+  --line: #2d2d6b;
+  --text: #f0f8ff;
+  --muted: #8a8fc4;
+  --accent: #00f3ff;
+  --accent-soft: rgba(0, 243, 255, 0.2);
+  --warn: #ff007f;
+}
+[data-theme="nord_frost"] {
+  --bg: #242933;
+  --bg-soft: #2e3440;
+  --card: #3b4252;
+  --card-hi: #434c5e;
+  --line: #4c566a;
+  --text: #eceff4;
+  --muted: #d8dee9;
+  --accent: #88c0d0;
+  --accent-soft: rgba(136, 192, 208, 0.2);
+}
+[data-theme="crimson_flame"] {
+  --bg: #0d0a0b;
+  --bg-soft: #140e10;
+  --card: #1c1417;
+  --card-hi: #281d22;
+  --line: #3b2830;
+  --text: #fbebee;
+  --muted: #ad8d96;
+  --accent: #e63946;
+  --accent-soft: rgba(230, 57, 70, 0.2);
+}
+[data-theme="dracula_purple"] {
+  --bg: #181528;
+  --bg-soft: #1e1a33;
+  --card: #282a36;
+  --card-hi: #343746;
+  --line: #44475a;
+  --text: #f8f8f2;
+  --muted: #6272a4;
+  --accent: #bd93f9;
+  --accent-soft: rgba(189, 147, 249, 0.2);
+  --good: #50fa7b;
+}
+[data-theme="matrix_hacker"] {
+  --bg: #040804;
+  --bg-soft: #081008;
+  --card: #0d1a0d;
+  --card-hi: #132613;
+  --line: #1c381c;
+  --text: #d4ffd4;
+  --muted: #669966;
+  --accent: #00ff66;
+  --accent-soft: rgba(0, 255, 102, 0.18);
+}
+[data-theme="hyperos_blue"] {
+  --bg: #0c1017;
+  --bg-soft: #121822;
+  --card: #18202e;
+  --card-hi: #222d40;
+  --line: #2b3952;
+  --text: #f0f4fc;
+  --muted: #8d9bb0;
+  --accent: #007aff;
+  --accent-soft: rgba(0, 122, 255, 0.2);
+}
+
 * { box-sizing: border-box; }
 
 html, body {

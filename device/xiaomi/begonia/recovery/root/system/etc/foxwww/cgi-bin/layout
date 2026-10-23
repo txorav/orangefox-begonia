@@ -1,0 +1,51 @@
+#!/system/bin/sh
+#
+# CGI endpoint: Partition Layout Switcher for Begonia
+#
+
+. ./lib.sh 2>/dev/null || . /system/etc/foxwww/cgi-bin/lib.sh
+
+json_header
+
+ACTION=""
+if [ "$REQUEST_METHOD" = "POST" ]; then
+    read_body
+    ACTION=$(param action)
+fi
+
+CURRENT_LAYOUT=$(getprop ro.begonia.layout)
+[ -n "$CURRENT_LAYOUT" ] || CURRENT_LAYOUT="auto"
+
+IS_DYNAMIC="false"
+if [ "$CURRENT_LAYOUT" = "dynamic" ] || grep -q "gDal" /dev/block/by-name/system 2>/dev/null; then
+    IS_DYNAMIC="true"
+fi
+
+if [ -n "$ACTION" ]; then
+    check_token || exit 0
+    case "$ACTION" in
+        dynamic)
+            /system/bin/switch_layout dynamic >/dev/null 2>&1
+            printf '{"ok":true,"action":"switch","layout":"dynamic","message":"Switched to dynamic super layout"}\n'
+            exit 0
+            ;;
+        nondynamic)
+            /system/bin/switch_layout nondynamic >/dev/null 2>&1
+            printf '{"ok":true,"action":"switch","layout":"nondynamic","message":"Switched to physical non-dynamic layout"}\n'
+            exit 0
+            ;;
+        *)
+            fail "invalid action"
+            exit 0
+            ;;
+    esac
+fi
+
+SUPER_DETECTED="false"
+if [ -b "/dev/block/by-name/system" ]; then
+    MAGIC=$(dd if=/dev/block/by-name/system bs=1 skip=4096 count=4 2>/dev/null | tr -d '\0')
+    [ "$MAGIC" = "gDal" ] && SUPER_DETECTED="true"
+fi
+
+printf '{"ok":true,"layout":"%s","is_dynamic":%s,"super_detected":%s,"boot_dynamic":"%s"}\n' \
+    "$CURRENT_LAYOUT" "$IS_DYNAMIC" "$SUPER_DETECTED" "$(getprop ro.boot.dynamic_partitions)"
