@@ -167,10 +167,13 @@
       <div><span>Active Modules</span><strong id="rootModCount">0</strong></div>
       <div><span>Installed Managers</span><strong id="rootMgrs">None</strong></div>
     </div>
-    <div class="actions" style="margin-top:12px;">
+    <div class="actions" style="margin-top:12px; gap:8px; display:flex; flex-wrap:wrap;">
       <button id="btnToggleSafeMode" class="ghost small warn">Toggle Safe Mode</button>
+      <button id="btnDisableAll" class="ghost small danger">Disable All (Bootloop Fix)</button>
+      <button id="btnEnableAll" class="ghost small">Enable All</button>
+      <button id="btnBackupRoot" class="ghost small">Backup Modules</button>
     </div>
-    <p id="rootState" class="muted small">Checking /data/adb for installed Magisk, KernelSU, KSUN, APatch, FolkPatch, and SukiSU modules&hellip;</p>
+    <p id="rootState" class="muted small">Checking /data/adb for installed Magisk, Alpha, Kitsune, KernelSU, KSUN, MKSU, APatch, FolkPatch, SukiSU, and Sui modules&hellip;</p>
     <ul id="rootModList" class="networks" style="margin-top:14px;"></ul>
   </section>
 

@@ -1113,6 +1113,45 @@
     }
   });
 
+  $('#btnDisableAll')?.addEventListener('click', async () => {
+    if (!confirm('Disable all root modules to rescue from bootloops?')) return;
+    try {
+      await api('/cgi-bin/root_action', {
+        method: 'POST',
+        body: new URLSearchParams({ action: 'disable_all' })
+      });
+      toast('All modules disabled across all root managers', 'warn');
+      await loadRootModules();
+    } catch(e) {
+      toast(e.message, 'bad');
+    }
+  });
+
+  $('#btnEnableAll')?.addEventListener('click', async () => {
+    try {
+      await api('/cgi-bin/root_action', {
+        method: 'POST',
+        body: new URLSearchParams({ action: 'enable_all' })
+      });
+      toast('All modules enabled', 'good');
+      await loadRootModules();
+    } catch(e) {
+      toast(e.message, 'bad');
+    }
+  });
+
+  $('#btnBackupRoot')?.addEventListener('click', async () => {
+    try {
+      await api('/cgi-bin/root_action', {
+        method: 'POST',
+        body: new URLSearchParams({ action: 'backup' })
+      });
+      toast('Modules & configs backed up to /sdcard/RootBackup', 'good');
+    } catch(e) {
+      toast(e.message, 'bad');
+    }
+  });
+
   renderWebQr();
   loadRootModules();
   loadRecmod();

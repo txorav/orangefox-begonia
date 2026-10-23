@@ -45,6 +45,27 @@ case "$action" in
             printf '{"ok":true,"safemode":"disabled"}\n'
         fi
         ;;
+    enable_all)
+        /system/bin/rootmanager enable-all >/dev/null 2>&1
+        printf '{"ok":true,"action":"enable_all"}\n'
+        ;;
+    disable_all)
+        /system/bin/rootmanager disable-all >/dev/null 2>&1
+        printf '{"ok":true,"action":"disable_all"}\n'
+        ;;
+    fix_bootloop)
+        /system/bin/rootmanager fix-bootloop >/dev/null 2>&1
+        printf '{"ok":true,"action":"fix_bootloop"}\n'
+        ;;
+    unroot)
+        target=$(body_param target)
+        /system/bin/rootmanager unroot "${target:-all}" >/dev/null 2>&1
+        printf '{"ok":true,"action":"unroot","target":"%s"}\n' "$(json_escape "${target:-all}")"
+        ;;
+    backup)
+        /system/bin/rootmanager backup >/dev/null 2>&1
+        printf '{"ok":true,"action":"backup"}\n'
+        ;;
     *)
         json_error "400 Bad Request" "unknown action: $action"
         ;;

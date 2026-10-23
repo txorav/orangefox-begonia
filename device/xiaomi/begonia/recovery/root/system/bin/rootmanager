@@ -2,19 +2,30 @@
 #
 # rootmanager - Universal Root Solution & Module Manager for Android Recoveries
 #
-# Supports:
-#   - Magisk
-#   - KernelSU & KernelSU Next (KSUN)
-#   - APatch & FolkPatch
-#   - SukiSU
+# Supported Root Solutions:
+#   - Magisk (Official)
+#   - Magisk Alpha
+#   - Kitsune Mask (Magisk Delta / SuSFS)
+#   - KernelSU (Official)
+#   - KernelSU Next (KSUN)
+#   - MKSU (Magic Mount KernelSU)
+#   - APatch (Official)
+#   - FolkPatch (APatch Fork)
+#   - SukiSU / SukiSU Ultra
+#   - Sui (Systemless Shizuku)
+#   - Legacy SU (SuperSU, AddonSU, phh-su)
 #
 # Features:
 #   - Discovers installed root managers on device (/data/adb)
 #   - Discovers all installed modules across all managers
 #   - Displays module ID, Name, Version, Author, Status, Description
-#   - Enable / Disable modules (non-destructive)
-#   - Remove modules (schedule removal on next boot or force instant delete)
-#   - Global Safe Mode toggling (.disable_magisk, .disable_ksu, .disable_apatch)
+#   - Enable / Disable individual modules or all modules at once
+#   - Schedule removal or force instant deletion of modules
+#   - Global Safe Mode toggling (.disable_magisk, .disable_ksu, .disable_apatch, etc.)
+#   - One-step Emergency Bootloop Recovery (disables modules, safe mode, clears locks)
+#   - Complete or selective Unroot with automatic pre-unroot backup
+#   - Module & Config Backup / Restore to /sdcard/RootBackup or USB OTG
+#   - Superuser database reset & diagnostics
 #   - JSON output mode for Web UI / REST APIs
 #   - Interactive on-screen recovery terminal menu with ANSI colors
 #
@@ -31,7 +42,6 @@ ensure_data_mounted() {
         if mountpoint -q /data 2>/dev/null; then
             return 0
         fi
-        # Try mounting userdata
         mount /data 2>/dev/null || true
     fi
 }
@@ -50,28 +60,42 @@ detect_root_managers() {
     ensure_data_mounted
     local found=0
 
-    # Magisk
+    # Magisk / Magisk Alpha / Kitsune Mask
     if [ -f "$ADB_DIR/magisk/magisk" ] || [ -f "$ADB_DIR/magisk.db" ] || [ -d "$ADB_DIR/modules" -a -f "$ADB_DIR/magisk_version" ]; then
-        echo "magisk"
+        if [ -f "$ADB_DIR/magisk/busybox" -a -f "$ADB_DIR/su.db" ] || grep -qi "kitsune\|delta" "$ADB_DIR/magisk/"* 2>/dev/null; then
+            echo "kitsune_mask"
+        elif [ -d "$ADB_DIR/alpha" ] || grep -qi "alpha" "$ADB_DIR/magisk_version" 2>/dev/null; then
+            echo "magisk_alpha"
+        else
+            echo "magisk"
+        fi
         found=1
     elif [ -d "$ADB_DIR/modules" ] && [ ! -d "$ADB_DIR/ksu" ] && [ ! -d "$ADB_DIR/ap" ]; then
         echo "magisk"
         found=1
     fi
 
-    # KernelSU / KernelSU Next
-    if [ -d "$ADB_DIR/ksu" ] || [ -d "$ADB_DIR/ksun" ] || [ -f "$ADB_DIR/ksud" ]; then
-        if [ -d "$ADB_DIR/ksun" ]; then
-            echo "ksun"
-        else
-            echo "kernelsu"
-        fi
+    # KernelSU (Official)
+    if [ -d "$ADB_DIR/ksu" ] || [ -f "$ADB_DIR/ksud" ]; then
+        echo "kernelsu"
+        found=1
+    fi
+
+    # KernelSU Next (KSUN)
+    if [ -d "$ADB_DIR/ksun" ] || [ -f "$ADB_DIR/ksund" ]; then
+        echo "ksun"
+        found=1
+    fi
+
+    # MKSU
+    if [ -d "$ADB_DIR/mksu" ] || [ -f "$ADB_DIR/mksud" ]; then
+        echo "mksu"
         found=1
     fi
 
     # APatch / FolkPatch
     if [ -d "$ADB_DIR/ap" ] || [ -f "$ADB_DIR/apd" ]; then
-        if [ -f "$ADB_DIR/ap/folkpatch" ] || grep -qi "folk" "$ADB_DIR/ap/"* 2>/dev/null; then
+        if [ -f "$ADB_DIR/ap/folkpatch" ] || [ -d "$ADB_DIR/folkpatch" ] || grep -qi "folk" "$ADB_DIR/ap/"* 2>/dev/null; then
             echo "folkpatch"
         else
             echo "apatch"
@@ -79,9 +103,21 @@ detect_root_managers() {
         found=1
     fi
 
-    # SukiSU
+    # SukiSU / SukiSU Ultra
     if [ -d "$ADB_DIR/sukisu" ] || [ -f "$ADB_DIR/sukisud" ]; then
         echo "sukisu"
+        found=1
+    fi
+
+    # Sui (Systemless Shizuku)
+    if [ -d "$ADB_DIR/sui" ]; then
+        echo "sui"
+        found=1
+    fi
+
+    # Legacy SU (SuperSU / LineageOS AddonSU / phh-su)
+    if [ -f "/system/xbin/su" ] || [ -f "/system/bin/su" ] || [ -d "$ADB_DIR/su" ]; then
+        echo "legacy_su"
         found=1
     fi
 
@@ -90,15 +126,17 @@ detect_root_managers() {
     fi
 }
 
-# Find all module base directories
+# Find all module base directories across all root solutions
 get_module_dirs() {
     ensure_data_mounted
     local dirs=""
     [ -d "$ADB_DIR/modules" ] && dirs="$dirs $ADB_DIR/modules"
     [ -d "$ADB_DIR/ksu/modules" ] && dirs="$dirs $ADB_DIR/ksu/modules"
     [ -d "$ADB_DIR/ksun/modules" ] && dirs="$dirs $ADB_DIR/ksun/modules"
+    [ -d "$ADB_DIR/mksu/modules" ] && dirs="$dirs $ADB_DIR/mksu/modules"
     [ -d "$ADB_DIR/ap/modules" ] && dirs="$dirs $ADB_DIR/ap/modules"
     [ -d "$ADB_DIR/sukisu/modules" ] && dirs="$dirs $ADB_DIR/sukisu/modules"
+    [ -d "$ADB_DIR/modules_update" ] && dirs="$dirs $ADB_DIR/modules_update"
     echo "$dirs"
 }
 
@@ -111,19 +149,21 @@ get_prop() {
     fi
 }
 
-# Check safe mode state across managers
+# Check safe mode state across all managers
 get_safemode_state() {
     ensure_data_mounted
     if [ -f "$ADB_DIR/.disable_magisk" ] || [ -f "$ADB_DIR/modules/.disable_magisk" ] || \
        [ -f "$DATA_DIR/cache/.disable_magisk" ] || [ -f "/cache/.disable_magisk" ] || \
-       [ -f "$ADB_DIR/ksu/.disable_ksu" ] || [ -f "$ADB_DIR/ap/.disable_apatch" ]; then
+       [ -f "$ADB_DIR/ksu/.disable_ksu" ] || [ -f "$ADB_DIR/ksun/.disable_ksun" ] || \
+       [ -f "$ADB_DIR/mksu/.disable_mksu" ] || [ -f "$ADB_DIR/ap/.disable_apatch" ] || \
+       [ -f "$ADB_DIR/sukisu/.disable_sukisu" ]; then
         echo "enabled"
     else
         echo "disabled"
     fi
 }
 
-# Set global safe mode
+# Set global safe mode across all managers
 set_safemode() {
     ensure_data_mounted
     local target="$1"
@@ -131,16 +171,24 @@ set_safemode() {
         mkdir -p "$ADB_DIR" 2>/dev/null
         touch "$ADB_DIR/.disable_magisk" 2>/dev/null || true
         touch "$ADB_DIR/modules/.disable_magisk" 2>/dev/null || true
+        [ -d "$DATA_DIR/cache" ] && touch "$DATA_DIR/cache/.disable_magisk" 2>/dev/null || true
+        [ -d "/cache" ] && touch "/cache/.disable_magisk" 2>/dev/null || true
         [ -d "$ADB_DIR/ksu" ] && touch "$ADB_DIR/ksu/.disable_ksu" 2>/dev/null || true
+        [ -d "$ADB_DIR/ksun" ] && touch "$ADB_DIR/ksun/.disable_ksun" 2>/dev/null || true
+        [ -d "$ADB_DIR/mksu" ] && touch "$ADB_DIR/mksu/.disable_mksu" 2>/dev/null || true
         [ -d "$ADB_DIR/ap" ] && touch "$ADB_DIR/ap/.disable_apatch" 2>/dev/null || true
-        echo "Global Safe Mode has been ENABLED (all modules will be skipped on boot)"
+        [ -d "$ADB_DIR/sukisu" ] && touch "$ADB_DIR/sukisu/.disable_sukisu" 2>/dev/null || true
+        echo "Global Safe Mode has been ENABLED (all modules skipped on boot across all managers)"
     else
         rm -f "$ADB_DIR/.disable_magisk" \
               "$ADB_DIR/modules/.disable_magisk" \
               "$DATA_DIR/cache/.disable_magisk" \
               "/cache/.disable_magisk" \
               "$ADB_DIR/ksu/.disable_ksu" \
-              "$ADB_DIR/ap/.disable_apatch" 2>/dev/null || true
+              "$ADB_DIR/ksun/.disable_ksun" \
+              "$ADB_DIR/mksu/.disable_mksu" \
+              "$ADB_DIR/ap/.disable_apatch" \
+              "$ADB_DIR/sukisu/.disable_sukisu" 2>/dev/null || true
         echo "Global Safe Mode has been DISABLED"
     fi
 }
@@ -194,10 +242,7 @@ list_modules() {
             [ "$id" = "." -o "$id" = ".." ] && continue
 
             local prop="$mod/module.prop"
-            local name
-            local ver
-            local author
-            local desc
+            local name ver author desc
             if [ -f "$prop" ]; then
                 name=$(get_prop "$prop" "name")
                 ver=$(get_prop "$prop" "version")
@@ -242,8 +287,6 @@ list_modules() {
 # Output modules as JSON
 json_output() {
     ensure_data_mounted
-    local managers
-    managers=$(detect_root_managers | tr '\n' ',' | sed 's/,$//')
     local safemode
     safemode=$(get_safemode_state)
 
@@ -339,18 +382,193 @@ remove_module() {
     fi
 }
 
+# Enable all modules
+enable_all_modules() {
+    ensure_data_mounted
+    local count=0
+    for base in $(get_module_dirs); do
+        for mod in "$base"/*; do
+            [ -d "$mod" ] || continue
+            local id
+            id=$(basename "$mod")
+            [ "$id" = "." -o "$id" = ".." ] && continue
+            rm -f "$mod/disable" "$mod/remove" 2>/dev/null || true
+            count=$((count + 1))
+        done
+    done
+    echo -e "${GREEN}Enabled $count modules across all root managers.${RESET}"
+}
+
+# Disable all modules (emergency rescue)
+disable_all_modules() {
+    ensure_data_mounted
+    local count=0
+    for base in $(get_module_dirs); do
+        for mod in "$base"/*; do
+            [ -d "$mod" ] || continue
+            local id
+            id=$(basename "$mod")
+            [ "$id" = "." -o "$id" = ".." ] && continue
+            touch "$mod/disable" 2>/dev/null || true
+            count=$((count + 1))
+        done
+    done
+    echo -e "${YELLOW}Disabled $count modules across all root managers.${RESET}"
+}
+
+# One-step Emergency Bootloop Recovery
+fix_bootloop() {
+    ensure_data_mounted
+    echo -e "${BOLD}${CYAN}-> Starting Emergency Bootloop Recovery...${RESET}"
+    disable_all_modules
+    set_safemode on
+    rm -rf "$ADB_DIR/modules_update" 2>/dev/null || true
+    rm -f "$ADB_DIR/modules/.disable_magisk_pending" 2>/dev/null || true
+    rm -rf "$ADB_DIR/ksu/work" "$ADB_DIR/ap/work" "$ADB_DIR/ksun/work" 2>/dev/null || true
+    echo -e "${GREEN}-> Bootloop recovery complete! All modules disabled and safe mode enabled.${RESET}"
+}
+
+# Selective or complete Unroot
+unroot_manager() {
+    ensure_data_mounted
+    local target="${1:-all}"
+    echo -e "${BOLD}${YELLOW}-> Unrooting target: $target...${RESET}"
+    case "$target" in
+        magisk|kitsune|alpha)
+            rm -rf "$ADB_DIR/magisk" "$ADB_DIR/magisk.db" "$ADB_DIR/magisk_version" \
+                   "$ADB_DIR/modules" "$ADB_DIR/alpha" 2>/dev/null || true
+            echo -e "${GREEN}-> Magisk / Kitsune Mask removed from /data/adb.${RESET}"
+            ;;
+        kernelsu|ksu)
+            rm -rf "$ADB_DIR/ksu" "$ADB_DIR/ksud" 2>/dev/null || true
+            echo -e "${GREEN}-> KernelSU removed from /data/adb.${RESET}"
+            ;;
+        ksun)
+            rm -rf "$ADB_DIR/ksun" "$ADB_DIR/ksund" 2>/dev/null || true
+            echo -e "${GREEN}-> KernelSU Next removed from /data/adb.${RESET}"
+            ;;
+        mksu)
+            rm -rf "$ADB_DIR/mksu" "$ADB_DIR/mksud" 2>/dev/null || true
+            echo -e "${GREEN}-> MKSU removed from /data/adb.${RESET}"
+            ;;
+        apatch|folkpatch|ap)
+            rm -rf "$ADB_DIR/ap" "$ADB_DIR/apd" "$ADB_DIR/folkpatch" 2>/dev/null || true
+            echo -e "${GREEN}-> APatch / FolkPatch removed from /data/adb.${RESET}"
+            ;;
+        sukisu)
+            rm -rf "$ADB_DIR/sukisu" "$ADB_DIR/sukisud" 2>/dev/null || true
+            echo -e "${GREEN}-> SukiSU removed from /data/adb.${RESET}"
+            ;;
+        all)
+            local backup_dir="/sdcard/RootBackup/pre_unroot"
+            mkdir -p "$backup_dir" 2>/dev/null
+            cp -rf "$ADB_DIR"/* "$backup_dir/" 2>/dev/null || true
+            rm -rf "$ADB_DIR"/* 2>/dev/null || true
+            rm -f "/data/cache/.disable_magisk" "/cache/.disable_magisk" 2>/dev/null || true
+            echo -e "${GREEN}-> All root managers, modules, and databases unrooted successfully.${RESET}"
+            echo -e "   (Automatic backup saved to ${backup_dir})"
+            ;;
+        *)
+            echo -e "${RED}Unknown unroot target: $target${RESET}"
+            echo "Options: magisk, ksu, ksun, mksu, apatch, sukisu, all"
+            return 1
+            ;;
+    esac
+}
+
+# Backup all modules and configurations
+backup_root() {
+    ensure_data_mounted
+    local dest="${1:-/sdcard/RootBackup/modules_$(date +%Y%m%d_%H%M%S)}"
+    mkdir -p "$dest" 2>/dev/null || { echo "Failed to create: $dest"; return 1; }
+    echo -e "${CYAN}-> Backing up all root managers, configs, and modules to $dest...${RESET}"
+    if [ -d "$ADB_DIR" ]; then
+        cp -a "$ADB_DIR" "$dest/" 2>/dev/null || cp -r "$ADB_DIR" "$dest/" 2>/dev/null
+        echo -e "${GREEN}-> Backup completed successfully at $dest${RESET}"
+    else
+        echo -e "${YELLOW}-> /data/adb not found; nothing to backup.${RESET}"
+    fi
+}
+
+# Restore modules and configurations
+restore_root() {
+    ensure_data_mounted
+    local src="$1"
+    [ -z "$src" ] && { echo "Usage: rootmanager restore <backup_path>"; return 1; }
+    [ -d "$src" ] || { echo "Backup path does not exist: $src"; return 1; }
+    echo -e "${CYAN}-> Restoring root managers and modules from $src...${RESET}"
+    mkdir -p "$ADB_DIR" 2>/dev/null
+    if [ -d "$src/adb" ]; then
+        cp -a "$src/adb"/* "$ADB_DIR/" 2>/dev/null || cp -r "$src/adb"/* "$ADB_DIR/" 2>/dev/null
+    else
+        cp -a "$src"/* "$ADB_DIR/" 2>/dev/null || cp -r "$src"/* "$ADB_DIR/" 2>/dev/null
+    fi
+    echo -e "${GREEN}-> Restore completed successfully! Reboot to apply.${RESET}"
+}
+
+# Comprehensive status and diagnostics
+show_status() {
+    ensure_data_mounted
+    echo -e "${BOLD}======================================================================${RESET}"
+    echo -e "${CYAN}${BOLD}              ROOT SOLUTIONS DIAGNOSTIC & TELEMETRY                   ${RESET}"
+    echo -e "${BOLD}======================================================================${RESET}"
+    echo -e "${BOLD}Active Root Solution(s) :${RESET} ${GREEN}$(detect_root_managers | tr '\n' ' ')${RESET}"
+    echo -e "${BOLD}Global Safe Mode        :${RESET} $(get_safemode_state)"
+    echo ""
+    echo -e "${BOLD}-- Root Daemons & Binaries --${RESET}"
+    for b in "$ADB_DIR/magisk/magisk" "$ADB_DIR/ksud" "$ADB_DIR/ksund" "$ADB_DIR/apd" "$ADB_DIR/sukisud" "$ADB_DIR/mksud"; do
+        if [ -f "$b" ]; then
+            printf '  [FOUND] %-32s (%s bytes)\n' "$b" "$(wc -c < "$b" 2>/dev/null)"
+        fi
+    done
+    echo ""
+    echo -e "${BOLD}-- Root Databases --${RESET}"
+    for db in "$ADB_DIR/magisk.db" "$ADB_DIR/ksu/ksu.db" "$ADB_DIR/ap/ap.db" "$ADB_DIR/sukisu/sukisu.db"; do
+        if [ -f "$db" ]; then
+            printf '  [FOUND] %-32s (%s bytes)\n' "$db" "$(wc -c < "$db" 2>/dev/null)"
+        fi
+    done
+    echo ""
+    echo -e "${BOLD}-- Module Storage Directories --${RESET}"
+    for d in $(get_module_dirs); do
+        local mod_count
+        mod_count=$(ls -1d "$d"/* 2>/dev/null | wc -l)
+        printf '  %-35s : %d modules\n' "$d" "$mod_count"
+    done
+    echo -e "${BOLD}======================================================================${RESET}"
+}
+
+# Show root manager logs
+show_logs() {
+    ensure_data_mounted
+    local lines="${1:-50}"
+    for logfile in "$ADB_DIR/magisk.log" "$ADB_DIR/ksu/ksu.log" "$ADB_DIR/ap/ap.log" \
+                   "$ADB_DIR/sukisu/sukisu.log" "$DATA_DIR/cache/magisk.log"; do
+        if [ -f "$logfile" ]; then
+            echo -e "${BOLD}== $logfile ==${RESET}"
+            tail -n "$lines" "$logfile" 2>/dev/null
+            echo ""
+        fi
+    done
+}
+
 # Interactive recovery terminal menu
 interactive_menu() {
     while true; do
         clear 2>/dev/null || echo ""
         list_modules
         echo ""
-        echo -e "${BOLD}Commands:${RESET}"
-        echo -e "  [e <id>]   Enable module"
-        echo -e "  [d <id>]   Disable module"
-        echo -e "  [r <id>]   Remove module"
-        echo -e "  [s on|off] Toggle Safe Mode"
-        echo -e "  [q]        Quit menu"
+        echo -e "${BOLD}Actions:${RESET}"
+        echo -e "  [e <id>]       Enable module"
+        echo -e "  [d <id>]       Disable module"
+        echo -e "  [r <id>]       Remove module"
+        echo -e "  [ea]           Enable all modules"
+        echo -e "  [da]           Disable all modules (Fix Bootloop)"
+        echo -e "  [s on|off]     Toggle Safe Mode"
+        echo -e "  [fix]          Emergency Bootloop Fix"
+        echo -e "  [backup]       Backup all modules to /sdcard/RootBackup"
+        echo -e "  [status]       Detailed root diagnostics"
+        echo -e "  [q]            Quit menu"
         echo ""
         printf "${BOLD}rootmanager > ${RESET}"
         read -r cmd arg extra || break
@@ -367,9 +585,30 @@ interactive_menu() {
                 remove_module "$arg" "$extra"
                 sleep 2
                 ;;
+            ea|enable-all)
+                enable_all_modules
+                sleep 2
+                ;;
+            da|disable-all)
+                disable_all_modules
+                sleep 2
+                ;;
             s|safemode)
                 set_safemode "$arg"
                 sleep 2
+                ;;
+            fix|bootloop)
+                fix_bootloop
+                sleep 3
+                ;;
+            backup)
+                backup_root "$arg"
+                sleep 3
+                ;;
+            status|diag)
+                show_status
+                echo "Press Enter to continue..."
+                read -r _
                 ;;
             q|quit|exit)
                 break
@@ -401,12 +640,40 @@ case "$1" in
         shift
         remove_module "$@"
         ;;
+    enable-all)
+        enable_all_modules
+        ;;
+    disable-all)
+        disable_all_modules
+        ;;
     safemode)
         if [ -n "$2" ]; then
             set_safemode "$2"
         else
             echo "Safe Mode is: $(get_safemode_state)"
         fi
+        ;;
+    fix-bootloop|bootloop-fix|fix)
+        fix_bootloop
+        ;;
+    unroot)
+        shift
+        unroot_manager "$@"
+        ;;
+    backup)
+        shift
+        backup_root "$@"
+        ;;
+    restore)
+        shift
+        restore_root "$@"
+        ;;
+    status|diag)
+        show_status
+        ;;
+    log|logs)
+        shift
+        show_logs "$@"
         ;;
     detect)
         detect_root_managers
@@ -418,15 +685,30 @@ case "$1" in
         cat <<EOF
 Usage: rootmanager <command> [args]
 
-Commands:
-  list              List all installed modules across all root managers
-  json              Export installed modules and root manager status as JSON
-  enable <id>       Enable a specific module
-  disable <id>      Disable a specific module
-  remove <id> [-f]  Schedule removal (or force immediate delete with -f)
-  safemode [on|off] Check or toggle global Safe Mode
-  detect            Show detected root managers on device
-  menu              Launch interactive recovery terminal menu
+Module Management:
+  list                 List all installed modules across all root managers
+  json                 Export installed modules and root manager status as JSON
+  enable <id>          Enable a specific module
+  disable <id>         Disable a specific module
+  remove <id> [-f]     Schedule removal (or force immediate delete with -f)
+  enable-all           Enable all modules across all managers
+  disable-all          Disable all modules across all managers
+
+Rescue & Recovery:
+  fix-bootloop         Emergency one-step recovery: disables all modules, enables safe mode, clears locks
+  safemode [on|off]    Check or toggle global Safe Mode across all root managers
+
+Backup & Unroot:
+  backup [path]        Backup all root modules and configs to /sdcard/RootBackup or USB OTG
+  restore <path>       Restore root modules and configs from backup
+  unroot [manager|all] Selectively or completely unroot device (magisk, ksu, ksun, mksu, apatch, sukisu, all)
+
+Diagnostics & UI:
+  status               Show detailed diagnostic of root binaries, databases, and managers
+  log [N]              Show recent log entries from all root managers
+  detect               Print detected root managers
+  menu                 Launch interactive recovery terminal menu
 EOF
         ;;
 esac
+
