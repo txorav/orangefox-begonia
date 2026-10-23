@@ -299,33 +299,57 @@ jobs:
               exit(0)
 
           try:
-              req = urllib.request.Request("https://api.gofile.io/servers")
+              req = urllib.request.Request("https://api.gofile.io/servers", headers={"Authorization": f"Bearer {gofile_token}"})
               with urllib.request.urlopen(req, timeout=15) as r:
-                  servers = json.loads(r.read().decode("utf-8"))
-                  server = servers.get("data", {}).get("servers", [{}])[0].get("name", "store1")
+                  sdata = json.loads(r.read().decode("utf-8"))
+                  servers = [s.get("name") for s in sdata.get("data", {}).get("servers", []) if s.get("name")]
           except Exception:
-              server = "store1"
+              servers = ["store-na-phx-1", "store6", "store3", "store1"]
+          if not servers:
+              servers = ["store-na-phx-1", "store6", "store3"]
 
           links = []
           for f in files:
               fname = os.path.basename(f)
               fsize = f"{os.path.getsize(f) / (1024*1024):.1f}MB"
               h = hashlib.sha256(open(f, "rb").read()).hexdigest()[:16]
-              print(f"Uploading {fname} ({fsize}) to Gofile server {server}...")
-              cmd = f"curl -sSL -X POST \"https://{server}.gofile.io/contents/uploadfile\" -H \"Authorization: Bearer {gofile_token}\" -F \"file=@{f}\""
-              out = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, text=True).stdout
+              
+              dl = None
+              for srv in servers:
+                  print(f"Uploading {fname} ({fsize}) to Gofile server {srv}...")
+                  cmd = f'curl -sSL --http1.1 --connect-timeout 30 --max-time 600 -X POST "https://{srv}.gofile.io/contents/uploadfile" -H "Authorization: Bearer {gofile_token}" -F "file=@{f}"'
+                  try:
+                      res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, text=True, timeout=660)
+                      if res.stdout:
+                          j = json.loads(res.stdout)
+                          dl = j.get("data", {}).get("downloadPage")
+                          if dl:
+                              print(f"Uploaded {fname} -> {dl}")
+                              break
+                  except Exception as e:
+                      print(f"Gofile server {srv} failed: {e}")
+
+              lb_dl = None
               try:
-                  res = json.loads(out)
-                  dl = res.get("data", {}).get("downloadPage")
-                  if dl:
-                      print(f"Uploaded {fname} -> {dl}")
-                      links.append(f"📦 <b>{fname}</b> ({fsize})\n🔗 <a href=\"{dl}\">Download from Gofile</a>\n🔑 <code>{h}...</code>")
-                  else:
-                      print(f"Gofile response error for {fname}: {out}")
-                      links.append(f"⚠️ <b>{fname}</b> ({fsize}) - Upload error")
+                  print(f"Uploading {fname} to Litterbox mirror...")
+                  lb_cmd = f'curl -sSL --http1.1 --connect-timeout 30 --max-time 600 -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@{f}" https://litterbox.catbox.moe/resources/internals/api.php'
+                  lb_res = subprocess.run(lb_cmd, shell=True, stdout=subprocess.PIPE, text=True, timeout=660).stdout.strip()
+                  if lb_res.startswith("http"):
+                      lb_dl = lb_res
+                      print(f"Litterbox uploaded: {lb_dl}")
               except Exception as e:
-                  print(f"Exception parsing Gofile response for {fname}: {e}")
-                  links.append(f"⚠️ <b>{fname}</b> ({fsize}) - Upload exception")
+                  print(f"Litterbox failed: {e}")
+
+              mirror_links = []
+              if dl:
+                  mirror_links.append(f'📂 <a href="{dl}">Gofile</a>')
+              if lb_dl:
+                  mirror_links.append(f'⚡ <a href="{lb_dl}">Litterbox (Direct)</a>')
+              
+              if mirror_links:
+                  links.append(f"📦 <b>{fname}</b> ({fsize})\n" + " | ".join(mirror_links) + f"\n🔑 <code>{h}...</code>")
+              else:
+                  links.append(f"⚠️ <b>{fname}</b> ({fsize}) - Upload error")
 
           msg = f"🎉 <b>{flavor} Build Completed!</b>\n\n📱 <b>Device:</b> Redmi Note 8 Pro (<code>begonia</code>)\n🌿 <b>Branch:</b> {branch}\n🔖 <b>Commit:</b> <a href=\"https://github.com/{repo}/commit/{sha}\">{sha}</a>\n⏱ <b>Run:</b> <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">View on GitHub Actions</a>\n\n" + "\n\n".join(links) + "\n\n🚀 <i>Ready to flash via fastboot or recovery!</i>"
           send_tg(msg)
