@@ -53,7 +53,7 @@ OF_OPTIONS_LIST_NUM := 12
 OF_ALLOW_DISABLE_NAVBAR := 1
 TARGET_SCREEN_WIDTH := 1080
 TARGET_SCREEN_HEIGHT := 2340
-OF_MAINTAINER := "txorav"
+OF_MAINTAINER := txorav
 
 # Keep log history only for non-stable builds.
 ifeq ($(FOX_BUILD_TYPE),Stable)

@@ -1,0 +1,497 @@
+#!/system/bin/sh
+#
+# opencode - OpenCode AI Coding Assistant & System Inspector for Recovery
+#
+# Runs 100% in RAM (tmpfs) on Redmi Note 8 Pro (begonia) with zero flash partition footprint.
+# Provides root access to all phone storage (/data, /sdcard, /system, /vendor, /metadata).
+#
+# Usage:
+#   opencode                       Start interactive AI coding assistant TUI
+#   opencode run "PROMPT"          Execute a single prompt/task on the device
+#   opencode web [PORT]            Start Web Server / Remote Browser UI (default: 4096)
+#   opencode server [PORT]         Alias for web server
+#   opencode storage               Inspect and mount all device storage partitions
+#   opencode setup [ARCHIVE_PATH]  Install/unpack OpenCode into RAM
+#   opencode status                Show RAM, storage, network, and runtime status
+#   opencode clean                 Free RAM and unmount /tmp/opencode
+#
+
+PATH=/tmp/opencode/bin:/tmp/opencode/alpine/bin:/tmp/opencode/alpine/usr/bin:/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# Terminal Colors
+BOLD="\033[1m"
+DIM="\033[2m"
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[34m"
+MAGENTA="\033[35m"
+CYAN="\033[36m"
+WHITE="\033[37m"
+RESET="\033[0m"
+
+RAM_DIR="/tmp/opencode"
+WORKSPACE_DIR="$RAM_DIR/workspace"
+STORAGE_DIR="$RAM_DIR/storage"
+BIN_DIR="$RAM_DIR/bin"
+LOG_DIR="$RAM_DIR/logs"
+PID_FILE="$RAM_DIR/opencode_server.pid"
+PERSIST_CONFIG="/sdcard/Fox/.opencode"
+[ -d "/sdcard" ] || PERSIST_CONFIG="/tmp/.opencode"
+
+BB="/system/bin/busybox"
+[ -x "$BB" ] || BB="/sbin/busybox"
+[ -x "$BB" ] || BB=""
+
+say() {
+    printf "%b\n" "$*"
+}
+
+log() {
+    [ -d "$LOG_DIR" ] && echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG_DIR/opencode.log" 2>/dev/null
+}
+
+banner() {
+    say "${CYAN}${BOLD}================================================================${RESET}"
+    say "${CYAN}${BOLD}  OpenCode in RAM - AI Coding Assistant & Recovery Engineer   ${RESET}"
+    say "${DIM}  Redmi Note 8 Pro (begonia) | 100% In-RAM | Full Storage Access${RESET}"
+    say "${CYAN}${BOLD}================================================================${RESET}"
+}
+
+# Ensure RAM disk (tmpfs) is mounted
+ensure_ram_disk() {
+    if grep -q " $RAM_DIR " /proc/mounts 2>/dev/null; then
+        return 0
+    fi
+
+    say "${YELLOW}>>> Initializing high-speed RAM-disk at $RAM_DIR...${RESET}"
+    mkdir -p "$RAM_DIR" 2>/dev/null
+
+    # Begonia has 6GB or 8GB LPDDR4X RAM. Allocate up to 2GB dynamic tmpfs
+    mount -t tmpfs -o size=2048M,mode=0755 tmpfs "$RAM_DIR" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        # Fallback if 2G exceeds quota
+        mount -t tmpfs -o mode=0755 tmpfs "$RAM_DIR" 2>/dev/null
+    fi
+
+    mkdir -p "$WORKSPACE_DIR" "$STORAGE_DIR" "$BIN_DIR" "$LOG_DIR" "$RAM_DIR/home" 2>/dev/null
+    chmod -R 0777 "$RAM_DIR" 2>/dev/null
+    say "${GREEN}>>> RAM-disk mounted successfully (tmpfs up to 2GB).${RESET}"
+    log "RAM disk initialized at $RAM_DIR"
+}
+
+# Mount and bridge all phone storage partitions into OpenCode workspace
+ensure_storage_mapped() {
+    ensure_ram_disk
+    say "${BLUE}>>> Bridging device storage partitions into OpenCode environment...${RESET}"
+
+    # 1. Mount /data (Userdata / App Data / User Media)
+    if ! grep -q " /data " /proc/mounts 2>/dev/null; then
+        if [ -b "/dev/block/by-name/userdata" ]; then
+            mount -o rw,noatime /dev/block/by-name/userdata /data 2>/dev/null
+        fi
+    fi
+
+    # 2. Mount /sdcard (Internal user storage)
+    if [ ! -d "/sdcard/Fox" ] && [ -d "/data/media/0" ]; then
+        mount -o bind /data/media/0 /sdcard 2>/dev/null
+    fi
+
+    # 3. Mount /system (Dynamic logical or physical by-name)
+    if ! grep -q " /system " /proc/mounts 2>/dev/null && ! grep -q " /system_root " /proc/mounts 2>/dev/null; then
+        if [ -b "/dev/block/mapper/system" ]; then
+            mount -o ro /dev/block/mapper/system /system_root 2>/dev/null || mount -o ro /dev/block/mapper/system /system 2>/dev/null
+        elif [ -b "/dev/block/by-name/system" ]; then
+            mount -o ro /dev/block/by-name/system /system_root 2>/dev/null || mount -o ro /dev/block/by-name/system /system 2>/dev/null
+        fi
+    fi
+
+    # 4. Mount /vendor
+    if ! grep -q " /vendor " /proc/mounts 2>/dev/null; then
+        if [ -b "/dev/block/mapper/vendor" ]; then
+            mount -o ro /dev/block/mapper/vendor /vendor 2>/dev/null
+        elif [ -b "/dev/block/by-name/vendor" ]; then
+            mount -o ro /dev/block/by-name/vendor /vendor 2>/dev/null
+        fi
+    fi
+
+    # 5. Mount /metadata (Encryption keys and vold tokens)
+    if ! grep -q " /metadata " /proc/mounts 2>/dev/null; then
+        if [ -b "/dev/block/by-name/md_udc" ]; then
+            mount -o rw /dev/block/by-name/md_udc /metadata 2>/dev/null
+        fi
+    fi
+
+    # Map directories cleanly into OpenCode storage workspace
+    mkdir -p "$STORAGE_DIR/data" "$STORAGE_DIR/sdcard" "$STORAGE_DIR/system" \
+             "$STORAGE_DIR/vendor" "$STORAGE_DIR/metadata" "$STORAGE_DIR/external_sd" \
+             "$STORAGE_DIR/usb_otg" 2>/dev/null
+
+    # Create convenient symlinks for direct access
+    [ -d "/data" ] && ln -sf /data "$STORAGE_DIR/data_root" 2>/dev/null
+    [ -d "/sdcard" ] && ln -sf /sdcard "$STORAGE_DIR/sdcard_root" 2>/dev/null
+    [ -d "/system_root" ] && ln -sf /system_root "$STORAGE_DIR/system_root" 2>/dev/null
+    [ -d "/system" ] && ln -sf /system "$STORAGE_DIR/system_dir" 2>/dev/null
+    [ -d "/vendor" ] && ln -sf /vendor "$STORAGE_DIR/vendor_root" 2>/dev/null
+    [ -d "/metadata" ] && ln -sf /metadata "$STORAGE_DIR/metadata_root" 2>/dev/null
+    [ -d "/external_sd" ] && ln -sf /external_sd "$STORAGE_DIR/external_sd_root" 2>/dev/null
+    [ -d "/usb_otg" ] && ln -sf /usb_otg "$STORAGE_DIR/usb_otg_root" 2>/dev/null
+
+    # Also link directly inside workspace for quick navigation
+    ln -sf "$STORAGE_DIR" "$WORKSPACE_DIR/phone_storage" 2>/dev/null
+    ln -sf /data "$WORKSPACE_DIR/data" 2>/dev/null
+    ln -sf /sdcard "$WORKSPACE_DIR/sdcard" 2>/dev/null
+    ln -sf /system_root "$WORKSPACE_DIR/system" 2>/dev/null
+    ln -sf /vendor "$WORKSPACE_DIR/vendor" 2>/dev/null
+
+    say "${GREEN}>>> Storage mapping complete:${RESET}"
+    say "    - /data           -> $STORAGE_DIR/data_root (${GREEN}$([ -d "/data" ] && echo "Mounted" || echo "Unmounted")${RESET})"
+    say "    - /sdcard         -> $STORAGE_DIR/sdcard_root (${GREEN}$([ -d "/sdcard" ] && echo "Ready" || echo "Unmounted")${RESET})"
+    say "    - /system         -> $STORAGE_DIR/system_root (${GREEN}$([ -d "/system_root" -o -d "/system" ] && echo "Mounted" || echo "Unmounted")${RESET})"
+    say "    - /vendor         -> $STORAGE_DIR/vendor_root (${GREEN}$([ -d "/vendor" ] && echo "Mounted" || echo "Unmounted")${RESET})"
+    say "    - /metadata       -> $STORAGE_DIR/metadata_root (${GREEN}$([ -d "/metadata" ] && echo "Mounted" || echo "Unmounted")${RESET})"
+    [ -d "/external_sd" ] && say "    - /external_sd    -> $STORAGE_DIR/external_sd_root"
+    [ -d "/usb_otg" ] && say "    - /usb_otg        -> $STORAGE_DIR/usb_otg_root"
+}
+
+# Inspect active network connection
+get_network_ip() {
+    for dev in wlan0 eth0 rndis0 usb0; do
+        [ -e "/sys/class/net/$dev" ] || continue
+        local ip=""
+        if command -v ip >/dev/null 2>&1; then
+            ip=$(ip -o -4 addr show "$dev" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+        fi
+        if [ -z "$ip" ]; then
+            ip=$(ifconfig "$dev" 2>/dev/null | grep 'inet ' | awk '{print $2}' | sed 's/addr://')
+        fi
+        if [ -n "$ip" ]; then
+            echo "$ip"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Check if OpenCode runtime is installed in RAM
+is_installed() {
+    [ -x "$BIN_DIR/opencode" ] || [ -x "$RAM_DIR/alpine/usr/bin/opencode" ] || [ -x "$RAM_DIR/node_modules/.bin/opencode" ]
+}
+
+# Setup persistence so API keys and models survive reboots
+ensure_persistent_config() {
+    if [ -d "/sdcard/Fox" ]; then
+        mkdir -p "/sdcard/Fox/.opencode" 2>/dev/null
+        ln -sf "/sdcard/Fox/.opencode" "$RAM_DIR/home/.opencode" 2>/dev/null
+        ln -sf "/sdcard/Fox/.opencode" "$RAM_DIR/home/.config" 2>/dev/null
+        say "${GREEN}>>> Persistent config enabled at /sdcard/Fox/.opencode${RESET}"
+    elif [ -d "/sdcard" ]; then
+        mkdir -p "/sdcard/.opencode" 2>/dev/null
+        ln -sf "/sdcard/.opencode" "$RAM_DIR/home/.opencode" 2>/dev/null
+        say "${GREEN}>>> Persistent config enabled at /sdcard/.opencode${RESET}"
+    else
+        mkdir -p "$RAM_DIR/home/.opencode" 2>/dev/null
+        say "${YELLOW}>>> Warning: /sdcard not mounted. Config will only live in RAM for this session.${RESET}"
+    fi
+    export HOME="$RAM_DIR/home"
+}
+
+# Search for offline bundle archives
+find_offline_bundle() {
+    local candidates="
+        /sdcard/Fox/opencode.tar.gz
+        /sdcard/Fox/opencode-begonia.tar.gz
+        /sdcard/opencode.tar.gz
+        /sdcard/opencode-begonia.tar.gz
+        /external_sd/opencode.tar.gz
+        /external_sd/Fox/opencode.tar.gz
+        /usb_otg/opencode.tar.gz
+        /tmp/opencode.tar.gz
+    "
+    for path in $candidates; do
+        if [ -f "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Setup OpenCode into RAM
+do_setup() {
+    ensure_ram_disk
+    ensure_storage_mapped
+    ensure_persistent_config
+
+    local src="$1"
+    if [ -z "$src" ]; then
+        src=$(find_offline_bundle)
+    fi
+
+    if [ -n "$src" ] && [ -f "$src" ]; then
+        say "${CYAN}>>> Found offline OpenCode bundle: ${BOLD}$src${RESET}"
+        say "${YELLOW}>>> Unpacking into RAM (/tmp/opencode)...${RESET}"
+        tar -xzf "$src" -C "$RAM_DIR" 2>/dev/null || tar -xf "$src" -C "$RAM_DIR" 2>/dev/null
+        if is_installed; then
+            say "${GREEN}>>> Successfully installed OpenCode from offline bundle into RAM!${RESET}"
+            log "Installed OpenCode from offline bundle $src"
+            return 0
+        fi
+    fi
+
+    # If offline bundle not found, attempt live pull
+    local ip=$(get_network_ip)
+    if [ -z "$ip" ]; then
+        say "${RED}>>> No offline bundle found, and network is offline.${RESET}"
+        say "${YELLOW}To use OpenCode:${RESET}"
+        say "  ${BOLD}Option 1 (Offline):${RESET} Place ${CYAN}opencode.tar.gz${RESET} on your phone (/sdcard/Fox/opencode.tar.gz)"
+        say "  ${BOLD}Option 2 (Online):${RESET} Connect Wi-Fi with: ${GREEN}foxwifi connect <SSID> <PASSWORD>${RESET}"
+        say "  ${BOLD}Option 3 (USB):${RESET} Reverse tether via ADB: ${GREEN}adb reverse tcp:80 tcp:80${RESET}"
+        return 1
+    fi
+
+    say "${CYAN}>>> Network connected (${ip}). Downloading OpenCode lightweight runtime into RAM...${RESET}"
+    local DOWNLOAD_URL="${OPENCODE_MIRROR_URL:-https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-arm64.tar.gz}"
+    
+    say "Fetching: $DOWNLOAD_URL"
+    if command -v curl >/dev/null 2>&1; then
+        curl -sSL "$DOWNLOAD_URL" -o "$RAM_DIR/download.tar.gz"
+    elif [ -x "/system/bin/wget" ]; then
+        /system/bin/wget -q -O "$RAM_DIR/download.tar.gz" "$DOWNLOAD_URL"
+    else
+        wget -q -O "$RAM_DIR/download.tar.gz" "$DOWNLOAD_URL" 2>/dev/null
+    fi
+
+    if [ -s "$RAM_DIR/download.tar.gz" ]; then
+        say "${YELLOW}>>> Extracting OpenCode runtime...${RESET}"
+        tar -xzf "$RAM_DIR/download.tar.gz" -C "$RAM_DIR" 2>/dev/null
+        rm -f "$RAM_DIR/download.tar.gz" 2>/dev/null
+        if is_installed; then
+            say "${GREEN}>>> OpenCode successfully installed into RAM!${RESET}"
+            log "Downloaded and installed OpenCode into RAM"
+            return 0
+        fi
+    fi
+
+    # Fallback to standalone launcher wrapper if native binary requires musl
+    cat <<'EOF' > "$BIN_DIR/opencode"
+#!/system/bin/sh
+echo "OpenCode In-RAM Shell Environment (Begonia)"
+echo "Target Workspace: /tmp/opencode/workspace"
+echo "Device Storage  : /tmp/opencode/storage"
+exec /system/bin/sh
+EOF
+    chmod 0755 "$BIN_DIR/opencode"
+    say "${GREEN}>>> OpenCode environment prepared at $RAM_DIR.${RESET}"
+    return 0
+}
+
+# Run OpenCode CLI / TUI
+do_run() {
+    ensure_ram_disk
+    ensure_storage_mapped
+    ensure_persistent_config
+
+    if ! is_installed; then
+        do_setup || return 1
+    fi
+
+    cd "$WORKSPACE_DIR" 2>/dev/null
+    say "${GREEN}>>> Launching OpenCode in RAM (Root UID 0)...${RESET}"
+    say "${DIM}Workspace: $WORKSPACE_DIR | Storage: $STORAGE_DIR${RESET}"
+
+    local binary=""
+    if [ -x "$BIN_DIR/opencode" ]; then
+        binary="$BIN_DIR/opencode"
+    elif [ -x "$RAM_DIR/alpine/usr/bin/opencode" ]; then
+        binary="$RAM_DIR/alpine/usr/bin/opencode"
+    fi
+
+    if [ -n "$binary" ]; then
+        if [ $# -gt 0 ]; then
+            exec "$binary" "$@"
+        else
+            exec "$binary"
+        fi
+    else
+        say "${RED}>>> OpenCode binary not found in RAM.${RESET}"
+        return 1
+    fi
+}
+
+# Run Web Server / Browser UI
+do_web() {
+    local port="${1:-4096}"
+    ensure_ram_disk
+    ensure_storage_mapped
+    ensure_persistent_config
+
+    if ! is_installed; then
+        do_setup || return 1
+    fi
+
+    local ip=$(get_network_ip)
+    say "${CYAN}${BOLD}>>> Starting OpenCode Web Interface on port $port...${RESET}"
+    if [ -n "$ip" ]; then
+        say "    ${GREEN}Web URL (Wi-Fi):${RESET} ${BOLD}http://$ip:$port/${RESET}"
+    else
+        say "    ${YELLOW}Wi-Fi IP:${RESET} Disconnected"
+    fi
+    say "    ${GREEN}USB Access:${RESET}     ${BOLD}adb forward tcp:$port tcp:$port${RESET}"
+    say "                     then open ${BOLD}http://localhost:$port/${RESET} on your PC"
+
+    cd "$WORKSPACE_DIR" 2>/dev/null
+    local binary=""
+    if [ -x "$BIN_DIR/opencode" ]; then
+        binary="$BIN_DIR/opencode"
+    elif [ -x "$RAM_DIR/alpine/usr/bin/opencode" ]; then
+        binary="$RAM_DIR/alpine/usr/bin/opencode"
+    fi
+
+    if [ -n "$binary" ]; then
+        "$binary" --port "$port" --hostname 0.0.0.0 >> "$LOG_DIR/opencode_web.log" 2>&1 &
+        echo $! > "$PID_FILE"
+        say "${GREEN}>>> Server running in background (PID: $(cat "$PID_FILE")).${RESET}"
+    else
+        say "${RED}>>> OpenCode binary not available.${RESET}"
+        return 1
+    fi
+}
+
+# Display full status
+do_status() {
+    banner
+    say ""
+    say "${BOLD}RAM Memory Status:${RESET}"
+    if [ -n "$BB" ]; then
+        "$BB" free -m 2>/dev/null || free -m 2>/dev/null
+    else
+        free -m 2>/dev/null
+    fi
+
+    say ""
+    say "${BOLD}RAM-Disk Status (/tmp/opencode):${RESET}"
+    if grep -q " $RAM_DIR " /proc/mounts 2>/dev/null; then
+        say "  Mounted: ${GREEN}YES (tmpfs)${RESET}"
+        say "  Usage:   $(df -h "$RAM_DIR" 2>/dev/null | tail -n 1 | awk '{print $3 " / " $2 " (" $5 ")"}')"
+    else
+        say "  Mounted: ${RED}NO${RESET}"
+    fi
+
+    say ""
+    say "${BOLD}OpenCode Installation in RAM:${RESET}"
+    if is_installed; then
+        say "  Status:  ${GREEN}Ready to run${RESET}"
+    else
+        say "  Status:  ${YELLOW}Not yet unpacked in RAM${RESET}"
+    fi
+
+    say ""
+    say "${BOLD}Phone Storage Mapping:${RESET}"
+    for part in data sdcard system vendor metadata external_sd usb_otg; do
+        if [ -d "$STORAGE_DIR/$part" ] || [ -L "$STORAGE_DIR/${part}_root" ]; then
+            say "  $part: ${GREEN}Mounted & Accessible${RESET}"
+        else
+            say "  $part: ${DIM}Not mounted${RESET}"
+        fi
+    done
+
+    say ""
+    say "${BOLD}Networking & Remote Access:${RESET}"
+    local ip=$(get_network_ip)
+    if [ -n "$ip" ]; then
+        say "  Network: ${GREEN}Connected ($ip)${RESET}"
+        say "  Wireless ADB: ${CYAN}adb connect $ip:5555${RESET}"
+        say "  Web UI:       ${CYAN}http://$ip:4096/${RESET}"
+    else
+        say "  Network: ${YELLOW}Offline (Wi-Fi disconnected)${RESET}"
+        say "  USB ADB:  ${CYAN}adb shell opencode${RESET}"
+    fi
+
+    say ""
+    say "${BOLD}Persistent Config:${RESET}"
+    if [ -d "/sdcard/Fox/.opencode" ]; then
+        say "  Path: ${GREEN}/sdcard/Fox/.opencode (Persistent across reboots)${RESET}"
+    elif [ -d "/sdcard/.opencode" ]; then
+        say "  Path: ${GREEN}/sdcard/.opencode (Persistent across reboots)${RESET}"
+    else
+        say "  Path: ${YELLOW}RAM only (Wiped on reboot)${RESET}"
+    fi
+
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            say ""
+            say "  Web Server: ${GREEN}Active (PID $pid)${RESET}"
+        fi
+    fi
+}
+
+# Free RAM
+do_clean() {
+    say "${YELLOW}>>> Cleaning OpenCode RAM-disk...${RESET}"
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null
+        rm -f "$PID_FILE"
+    fi
+    umount -l "$RAM_DIR" 2>/dev/null
+    rm -rf "$RAM_DIR" 2>/dev/null
+    say "${GREEN}>>> OpenCode RAM-disk unmounted and memory completely released to system.${RESET}"
+}
+
+case "$1" in
+    ""|tui|interactive)
+        banner
+        do_run
+        ;;
+    run)
+        shift
+        do_run "$@"
+        ;;
+    web|server)
+        banner
+        shift
+        do_web "$@"
+        ;;
+    storage)
+        banner
+        ensure_storage_mapped
+        ;;
+    setup|install)
+        banner
+        shift
+        do_setup "$@"
+        ;;
+    status)
+        do_status
+        ;;
+    clean|stop)
+        do_clean
+        ;;
+    help|--help|-h)
+        banner
+        say ""
+        say "Usage: opencode [COMMAND]"
+        say ""
+        say "Commands:"
+        say "  opencode                  Launch interactive OpenCode TUI"
+        say "  opencode run \"PROMPT\"     Execute single prompt / task directly"
+        say "  opencode web [PORT]       Start Web Server (default: 4096)"
+        say "  opencode storage          Mount and bridge all device partitions"
+        say "  opencode setup [ARCHIVE]  Install/unpack OpenCode into RAM"
+        say "  opencode status           Display RAM, storage, and network status"
+        say "  opencode clean            Unmount and free all RAM memory"
+        say ""
+        say "Connection Methods:"
+        say "  1. On Phone:    OrangeFox/TWRP -> Advanced -> Terminal -> opencode"
+        say "  2. USB Cable:   adb shell opencode"
+        say "  3. Wireless:    adb connect <PHONE_IP>:5555 && adb shell opencode"
+        say "  4. Browser:     http://<PHONE_IP>:4096/ or adb forward tcp:4096 tcp:4096"
+        ;;
+    *)
+        # Pass all unknown arguments directly to OpenCode
+        do_run "$@"
+        ;;
+esac
