@@ -1,12 +1,16 @@
 name: Deliver OrangeFox Artifacts
 
 on:
+  push:
+    paths:
+      - '.github/workflows/deliver.yml'
   workflow_dispatch:
     inputs:
       run_id:
         description: 'Run ID to deliver'
         required: false
         default: '39992577944'
+        type: string
 
 permissions:
   contents: write
