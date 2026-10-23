@@ -230,3 +230,56 @@ jobs:
             ${{ env.SRC_DIR }}/out/target/product/begonia/OrangeFox-*.zip
             ${{ env.SRC_DIR }}/out/target/product/begonia/recovery.img
           generate_release_notes: true
+
+      - name: Upload Artifacts to Gofile & Notify Telegram
+        if: always()
+        env:
+          GOFILE_TOKEN: 'IoC222lPjhLcrkCYcgVLdo7OkQRDW201'
+          TELEGRAM_BOT_TOKEN: '8477945979:AAGTYiUAfnPjQFpkh576D7Xsqm0RDQJr_As'
+          TELEGRAM_CHAT_ID: '8198896729'
+          JOB_STATUS: ${{ job.status }}
+          RECOVERY_FLAVOR: 'OrangeFox'
+        run: |
+          if [ "$JOB_STATUS" = "success" ]; then
+            echo "Build successful! Finding recovery artifacts..."
+            TARGET_DIR="${SRC_DIR}/out/target/product/begonia"
+            FILES=$(find "$TARGET_DIR" -maxdepth 1 \( -name "*.zip" -o -name "recovery.img" \) -type f 2>/dev/null || true)
+            
+            if [ -z "$FILES" ]; then
+              echo "No artifacts found in $TARGET_DIR"
+              TEXT="⚠️ *${RECOVERY_FLAVOR} Build Succeeded* but no artifact files were found in target dir!%0A%0A📱 *Device:* Redmi Note 8 Pro (`begonia`)%0A⏱ *Run:* [GitHub Actions](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+              curl -sSL -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"                 -d "chat_id=${TELEGRAM_CHAT_ID}" -d "text=${TEXT}" -d "parse_mode=Markdown" || true
+              exit 0
+            fi
+
+            echo "Querying best Gofile upload server..."
+            SERVER=$(curl -sSL "https://api.gofile.io/servers" | jq -r '.data.servers[0].name // "store1"')
+            echo "Selected Gofile server: $SERVER"
+
+            LINKS_MSG=""
+            for f in $FILES; do
+              FNAME=$(basename "$f")
+              FSIZE=$(du -h "$f" | cut -f1)
+              FSHA=$(sha256sum "$f" | cut -d' ' -f1)
+              echo "Uploading $FNAME ($FSIZE) to Gofile..."
+
+              RESP=$(curl -sSL -X POST "https://${SERVER}.gofile.io/contents/uploadfile"                 -H "Authorization: Bearer ${GOFILE_TOKEN}"                 -F "file=@$f")
+
+              DL=$(echo "$RESP" | jq -r '.data.downloadPage // empty')
+              if [ -n "$DL" ]; then
+                echo "Successfully uploaded $FNAME -> $DL"
+                LINKS_MSG="${LINKS_MSG}📦 *${FNAME}* (${FSIZE})%0A🔗 [Download from Gofile](${DL})%0A🔑 `${FSHA:0:16}...`%0A%0A"
+              else
+                echo "Gofile upload failed for $f: $RESP"
+                LINKS_MSG="${LINKS_MSG}⚠️ *${FNAME}* (${FSIZE}) - Gofile upload failed%0A"
+              fi
+            done
+
+            MSG="🎉 *${RECOVERY_FLAVOR} Build Completed!*%0A%0A📱 *Device:* Redmi Note 8 Pro (`begonia`)%0A🌿 *Branch:* `${GITHUB_REF_NAME}`%0A🔖 *Commit:* [`${GITHUB_SHA:0:7}`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})%0A⏱ *Run:* [View on GitHub Actions](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})%0A%0A${LINKS_MSG}🚀 _Ready to flash in recovery or fastboot!_"
+
+            curl -sSL -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"               -d "chat_id=${TELEGRAM_CHAT_ID}"               -d "text=${MSG}"               -d "parse_mode=Markdown"               -d "disable_web_page_preview=true"
+          else
+            echo "Build failed or cancelled."
+            FAIL_MSG="❌ *${RECOVERY_FLAVOR} Build Failed!*%0A%0A📱 *Device:* Redmi Note 8 Pro (`begonia`)%0A🌿 *Branch:* `${GITHUB_REF_NAME}`%0A🔖 *Commit:* [`${GITHUB_SHA:0:7}`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})%0A⏱ *Logs:* [View Failed Run](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            curl -sSL -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"               -d "chat_id=${TELEGRAM_CHAT_ID}"               -d "text=${FAIL_MSG}"               -d "parse_mode=Markdown"               -d "disable_web_page_preview=true"
+          fi
