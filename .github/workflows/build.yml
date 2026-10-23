@@ -233,6 +233,7 @@ jobs:
 
       - name: Upload Artifacts to Gofile & Notify Telegram
         if: always()
+        continue-on-error: true
         env:
           GOFILE_TOKEN: 'IoC222lPjhLcrkCYcgVLdo7OkQRDW201'
           TELEGRAM_BOT_TOKEN: '8477945979:AAGTYiUAfnPjQFpkh576D7Xsqm0RDQJr_As'
@@ -240,46 +241,74 @@ jobs:
           JOB_STATUS: ${{ job.status }}
           RECOVERY_FLAVOR: 'OrangeFox'
         run: |
-          if [ "$JOB_STATUS" = "success" ]; then
-            echo "Build successful! Finding recovery artifacts..."
-            TARGET_DIR="${SRC_DIR}/out/target/product/begonia"
-            FILES=$(find "$TARGET_DIR" -maxdepth 1 \( -name "*.zip" -o -name "recovery.img" \) -type f 2>/dev/null || true)
-            
-            if [ -z "$FILES" ]; then
-              echo "No artifacts found in $TARGET_DIR"
-              TEXT="⚠️ *${RECOVERY_FLAVOR} Build Succeeded* but no artifact files were found in target dir!%0A%0A📱 *Device:* Redmi Note 8 Pro (`begonia`)%0A⏱ *Run:* [GitHub Actions](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
-              curl -sSL -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"                 -d "chat_id=${TELEGRAM_CHAT_ID}" -d "text=${TEXT}" -d "parse_mode=Markdown" || true
-              exit 0
-            fi
+          python3 - << 'EOF'
+          import os, glob, hashlib, json, subprocess, urllib.request
 
-            echo "Querying best Gofile upload server..."
-            SERVER=$(curl -sSL "https://api.gofile.io/servers" | jq -r '.data.servers[0].name // "store1"')
-            echo "Selected Gofile server: $SERVER"
+          flavor = os.environ.get("RECOVERY_FLAVOR", "Recovery")
+          status = os.environ.get("JOB_STATUS", "failure")
+          gofile_token = os.environ.get("GOFILE_TOKEN", "")
+          tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "")
+          src_dir = os.environ.get("SRC_DIR", "aosp")
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          run_id = os.environ.get("GITHUB_RUN_ID", "")
+          sha = os.environ.get("GITHUB_SHA", "")[:7]
+          branch = os.environ.get("GITHUB_REF_NAME", "main")
 
-            LINKS_MSG=""
-            for f in $FILES; do
-              FNAME=$(basename "$f")
-              FSIZE=$(du -h "$f" | cut -f1)
-              FSHA=$(sha256sum "$f" | cut -d' ' -f1)
-              echo "Uploading $FNAME ($FSIZE) to Gofile..."
+          def send_tg(text):
+              if not tg_token or not tg_chat: return
+              data = json.dumps({
+                  "chat_id": tg_chat,
+                  "text": text,
+                  "parse_mode": "HTML",
+                  "disable_web_page_preview": True
+              }).encode("utf-8")
+              req = urllib.request.Request(f"https://api.telegram.org/bot{tg_token}/sendMessage", data=data, headers={"Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r: pass
+              except Exception as e: print("Telegram send error:", e)
 
-              RESP=$(curl -sSL -X POST "https://${SERVER}.gofile.io/contents/uploadfile"                 -H "Authorization: Bearer ${GOFILE_TOKEN}"                 -F "file=@$f")
+          if status != "success":
+              fail_msg = f"❌ <b>{flavor} Build Failed!</b>\n\n📱 <b>Device:</b> Redmi Note 8 Pro (<code>begonia</code>)\n🌿 <b>Branch:</b> {branch}\n🔖 <b>Commit:</b> <a href=\"https://github.com/{repo}/commit/{sha}\">{sha}</a>\n⏱ <b>Logs:</b> <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">View Failed Run</a>"
+              send_tg(fail_msg)
+              exit(0)
 
-              DL=$(echo "$RESP" | jq -r '.data.downloadPage // empty')
-              if [ -n "$DL" ]; then
-                echo "Successfully uploaded $FNAME -> $DL"
-                LINKS_MSG="${LINKS_MSG}📦 *${FNAME}* (${FSIZE})%0A🔗 [Download from Gofile](${DL})%0A🔑 `${FSHA:0:16}...`%0A%0A"
-              else
-                echo "Gofile upload failed for $f: $RESP"
-                LINKS_MSG="${LINKS_MSG}⚠️ *${FNAME}* (${FSIZE}) - Gofile upload failed%0A"
-              fi
-            done
+          target_dir = f"{src_dir}/out/target/product/begonia"
+          files = sorted(glob.glob(f"{target_dir}/*.zip") + glob.glob(f"{target_dir}/recovery.img"))
+          if not files:
+              send_tg(f"⚠️ <b>{flavor} Build Succeeded</b> but no recovery artifacts were found in {target_dir}.\n⏱ Run: <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">#{run_id}</a>")
+              exit(0)
 
-            MSG="🎉 *${RECOVERY_FLAVOR} Build Completed!*%0A%0A📱 *Device:* Redmi Note 8 Pro (`begonia`)%0A🌿 *Branch:* `${GITHUB_REF_NAME}`%0A🔖 *Commit:* [`${GITHUB_SHA:0:7}`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})%0A⏱ *Run:* [View on GitHub Actions](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})%0A%0A${LINKS_MSG}🚀 _Ready to flash in recovery or fastboot!_"
+          try:
+              req = urllib.request.Request("https://api.gofile.io/servers")
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  servers = json.loads(r.read().decode("utf-8"))
+                  server = servers.get("data", {}).get("servers", [{}])[0].get("name", "store1")
+          except Exception:
+              server = "store1"
 
-            curl -sSL -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"               -d "chat_id=${TELEGRAM_CHAT_ID}"               -d "text=${MSG}"               -d "parse_mode=Markdown"               -d "disable_web_page_preview=true"
-          else
-            echo "Build failed or cancelled."
-            FAIL_MSG="❌ *${RECOVERY_FLAVOR} Build Failed!*%0A%0A📱 *Device:* Redmi Note 8 Pro (`begonia`)%0A🌿 *Branch:* `${GITHUB_REF_NAME}`%0A🔖 *Commit:* [`${GITHUB_SHA:0:7}`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})%0A⏱ *Logs:* [View Failed Run](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
-            curl -sSL -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"               -d "chat_id=${TELEGRAM_CHAT_ID}"               -d "text=${FAIL_MSG}"               -d "parse_mode=Markdown"               -d "disable_web_page_preview=true"
-          fi
+          links = []
+          for f in files:
+              fname = os.path.basename(f)
+              fsize = f"{os.path.getsize(f) / (1024*1024):.1f}MB"
+              h = hashlib.sha256(open(f, "rb").read()).hexdigest()[:16]
+              print(f"Uploading {fname} ({fsize}) to Gofile server {server}...")
+              cmd = f"curl -sSL -X POST \"https://{server}.gofile.io/contents/uploadfile\" -H \"Authorization: Bearer {gofile_token}\" -F \"file=@{f}\""
+              out = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, text=True).stdout
+              try:
+                  res = json.loads(out)
+                  dl = res.get("data", {}).get("downloadPage")
+                  if dl:
+                      print(f"Uploaded {fname} -> {dl}")
+                      links.append(f"📦 <b>{fname}</b> ({fsize})\n🔗 <a href=\"{dl}\">Download from Gofile</a>\n🔑 <code>{h}...</code>")
+                  else:
+                      print(f"Gofile response error for {fname}: {out}")
+                      links.append(f"⚠️ <b>{fname}</b> ({fsize}) - Upload error")
+              except Exception as e:
+                  print(f"Exception parsing Gofile response for {fname}: {e}")
+                  links.append(f"⚠️ <b>{fname}</b> ({fsize}) - Upload exception")
+
+          msg = f"🎉 <b>{flavor} Build Completed!</b>\n\n📱 <b>Device:</b> Redmi Note 8 Pro (<code>begonia</code>)\n🌿 <b>Branch:</b> {branch}\n🔖 <b>Commit:</b> <a href=\"https://github.com/{repo}/commit/{sha}\">{sha}</a>\n⏱ <b>Run:</b> <a href=\"https://github.com/{repo}/actions/runs/{run_id}\">View on GitHub Actions</a>\n\n" + "\n\n".join(links) + "\n\n🚀 <i>Ready to flash via fastboot or recovery!</i>"
+          send_tg(msg)
+          print("Notification sent successfully!")
+          EOF
