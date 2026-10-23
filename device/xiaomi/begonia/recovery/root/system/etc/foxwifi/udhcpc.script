@@ -28,6 +28,13 @@ case "$1" in
         for d in $dns; do
             echo "nameserver $d" >> /etc/resolv.conf 2>/dev/null
         done
+        if [ -x /system/bin/foxadb ]; then
+            /system/bin/foxadb on >/dev/null 2>&1
+        else
+            setprop service.adb.tcp.port 5555
+            setprop ctl.restart adbd 2>/dev/null
+        fi
+        echo "$(date '+%H:%M:%S') Wireless ADB active: adb connect ${ip}:5555" >> /tmp/foxadb.log 2>/dev/null
         ;;
 esac
 

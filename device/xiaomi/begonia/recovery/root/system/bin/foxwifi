@@ -228,14 +228,24 @@ prepare_firmware() {
 }
 
 write_conf() {
+    country=$(get_prop ro.boot.wificountrycode)
+    [ -z "$country" ] && country=$(get_prop persist.sys.country)
+    [ -z "$country" ] && country=$(get_prop ro.product.locale | cut -d- -f2)
+    # Default to 00 (World Regulatory Domain) to unlock all 2.4 GHz and 5 GHz channels
+    [ -z "$country" ] && country="00"
+
     {
         echo "ctrl_interface=$CTRL"
         # Do not set ctrl_interface_group=0: wpa_supplicant runs as
         # AID_WIFI and cannot chown the socket to root.  The socket is
         # created with the supplicant's own wifi group instead.
         echo "update_config=1"
-        echo "country=US"
+        echo "country=$country"
         echo "ap_scan=1"
+        echo "p2p_disabled=1"
+        echo "wowlan_triggers=any"
+        echo "pmf=1"
+        echo "sae_pwe=2"
     } > "$CONF"
     # wpa_supplicant is not running as root by the time it opens this file.
     # Give it to AID_WIFI, with a readable fallback if chown is unavailable.
@@ -689,7 +699,12 @@ connect_network() {
 
     start_dhcp || return 1
     remember_last "$ssid" "$psk" "$enc"
-    say "connected to \"$ssid\" - IP $(get_ip)"
+    ip=$(get_ip)
+    say "connected to \"$ssid\" - IP $ip"
+    if [ -x /system/bin/foxadb ]; then
+        /system/bin/foxadb on >/dev/null 2>&1
+        say "Wireless ADB enabled: adb connect $ip:5555"
+    fi
     return 0
 }
 
@@ -721,12 +736,15 @@ cmd_scan_json() {
             gsub(/\\/, "\\\\", ssid)
             gsub(/"/, "\\\"", ssid)
             gsub(/\r/, "", ssid)
+            freq = $2 + 0
+            band = (freq > 4000 ? "5GHz" : "2.4GHz")
+            chan = (freq == 2484 ? 14 : (freq < 4000 ? int((freq - 2407) / 5) : int((freq - 5000) / 5)))
             sec = "OPEN"
             if ($4 ~ /SAE/) sec = "WPA3"
             else if ($4 ~ /WPA2/ || $4 ~ /RSN/) sec = "WPA2"
             else if ($4 ~ /WPA/) sec = "WPA"
-            printf "%s{\"ssid\":\"%s\",\"bssid\":\"%s\",\"freq\":%s,\"signal\":%s,\"security\":\"%s\"}", \
-                (first ? "" : ","), ssid, $1, $2, $3, sec
+            printf "%s{\"ssid\":\"%s\",\"bssid\":\"%s\",\"freq\":%s,\"band\":\"%s\",\"channel\":%d,\"signal\":%s,\"security\":\"%s\"}", \
+                (first ? "" : ","), ssid, $1, $2, band, chan, $3, sec
             first = 0
         }' | tr -d '\n'
     printf ']\n'
@@ -735,11 +753,13 @@ cmd_scan_json() {
 cmd_scan() {
     scan_raw | awk -F'\t' '
         NF >= 5 && $5 != "" && !seen[$5]++ {
+            freq = $2 + 0
+            band = (freq > 4000 ? "5GHz" : "2.4G")
             sec = "OPEN"
             if ($4 ~ /SAE/) sec = "WPA3"
             else if ($4 ~ /WPA2/ || $4 ~ /RSN/) sec = "WPA2"
             else if ($4 ~ /WPA/) sec = "WPA"
-            printf "%4s dBm  %-6s  %s\n", $3, sec, $5
+            printf "%4s dBm  %-5s  %-6s  %s\n", $3, band, sec, $5
         }'
 }
 

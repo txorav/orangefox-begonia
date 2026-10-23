@@ -2,6 +2,7 @@ import /microtrust_begonia.rc
 import /init.recovery.wifi.rc
 
 on early-init
+    setprop service.adb.tcp.port 5555
     start adbd
     mkdir /Fox 0777 root root
     mkdir /Fox/FoxFiles 0777 root root
@@ -22,6 +23,7 @@ on init
     exec u:r:recovery:s0 -- /system/bin/detect_partition_layout.sh
 
 on boot
+    setprop service.adb.tcp.port 5555
     start hwservicemanager
     start servicemanager
     start teei_daemon

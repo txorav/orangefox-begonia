@@ -670,6 +670,14 @@
         sec.textContent = net.security || 'OPEN';
         li.appendChild(sec);
 
+        const bandText = net.band || (net.freq && Number(net.freq) > 4000 ? '5GHz' : (net.freq ? '2.4GHz' : ''));
+        if (bandText) {
+          const band = document.createElement('span');
+          band.className = 'sec';
+          band.textContent = bandText;
+          li.appendChild(band);
+        }
+
         const connect = document.createElement('button');
         connect.className = 'ghost small';
         connect.textContent = 'Connect';

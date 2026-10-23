@@ -44,28 +44,35 @@ running() {
 }
 
 get_ip() {
-    if command -v ip >/dev/null 2>&1; then
-        addr=$(ip -o -4 addr show "$IFACE" 2>/dev/null \
-            | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+    for dev in "$IFACE" eth0 rndis0 usb0; do
+        [ -e "/sys/class/net/$dev" ] || continue
+        if command -v ip >/dev/null 2>&1; then
+            addr=$(ip -o -4 addr show "$dev" 2>/dev/null \
+                | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+            if [ -n "$addr" ]; then
+                echo "$addr"
+                return 0
+            fi
+        fi
+        addr=$(ifconfig "$dev" 2>/dev/null | awk '
+            /inet addr:/ {
+                for (i = 1; i <= NF; i++)
+                    if ($i ~ /^addr:/) { sub(/^addr:/, "", $i); print $i; exit }
+            }
+            /inet / {
+                for (i = 1; i <= NF; i++)
+                    if ($i == "inet") {
+                        addr = $(i + 1)
+                        sub(/\/.*/, "", addr)
+                        print addr
+                        exit
+                    }
+            }')
         if [ -n "$addr" ]; then
             echo "$addr"
             return 0
         fi
-    fi
-    ifconfig "$IFACE" 2>/dev/null | awk '
-        /inet addr:/ {
-            for (i = 1; i <= NF; i++)
-                if ($i ~ /^addr:/) { sub(/^addr:/, "", $i); print $i; exit }
-        }
-        /inet / {
-            for (i = 1; i <= NF; i++)
-                if ($i == "inet") {
-                    addr = $(i + 1)
-                    sub(/\/.*/, "", addr)
-                    print addr
-                    exit
-                }
-        }'
+    done
 }
 
 adb_prop() {
