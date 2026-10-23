@@ -28,7 +28,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           mkdir -p delivered_artifacts
-          TARGET_RUN="${{ github.event.inputs.run_id }}"
+          TARGET_RUN="${{ github.event.inputs.run_id || '39992577944' }}"
           echo "Downloading artifacts from run: $TARGET_RUN"
           gh run download "$TARGET_RUN" -R "${{ github.repository }}" -D delivered_artifacts/
           echo "Downloaded contents:"
@@ -42,16 +42,11 @@ jobs:
           TAG="R12.0-begonia-$(date +%Y%m%d-%H%M)"
           FILES=$(find delivered_artifacts/ -type f \( -name "*.zip" -o -name "*.img" \))
           echo "Release files: $FILES"
+          NOTE=$(printf "OrangeFox Recovery R12.0 for Redmi Note 8 Pro (begonia)\n\n- Source Build Run: %s\n- Decryption: FBE v1 aes-256-cts:v1 supported\n- Flashlight: /sys/class/leds/torch-light0 node\n- Wi-Fi: Native wpa_supplicant built\n- Root Manager: APatch & Magisk detection enabled\n" "${{ github.event.inputs.run_id || '39992577944' }}")
           gh release create "$TAG" $FILES \
             --repo "${{ github.repository }}" \
             --title "OrangeFox Recovery R12.0 - Begonia ($TAG)" \
-            --notes "OrangeFox Recovery R12.0 for Redmi Note 8 Pro (begonia)
-            
-- Source Build Run: ${{ github.event.inputs.run_id }}
-- Decryption: FBE v1 aes-256-cts:v1 supported
-- Flashlight: /sys/class/leds/torch-light0 node
-- Wi-Fi: Native wpa_supplicant built
-- Root Manager: APatch & Magisk detection enabled"
+            --notes "$NOTE"
           echo "release_tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Upload to Gofile, Litterbox & Notify Telegram
@@ -60,7 +55,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: '8477945979:AAGTYiUAfnPjQFpkh576D7Xsqm0RDQJr_As'
           TELEGRAM_CHAT_ID: '8198896729'
           RECOVERY_FLAVOR: 'OrangeFox'
-          RUN_ID: ${{ github.event.inputs.run_id }}
+          RUN_ID: ${{ github.event.inputs.run_id || '39992577944' }}
           RELEASE_TAG: ${{ steps.create_release.outputs.release_tag }}
         run: |
           python3 - << 'EOF'
