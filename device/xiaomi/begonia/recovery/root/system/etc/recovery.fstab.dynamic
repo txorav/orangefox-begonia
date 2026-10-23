@@ -1,0 +1,20 @@
+# Android fstab file for Dynamic (retrofitted super) layout
+# Redmi Note 8 Pro (begonia)
+
+# <src>                                           <mnt_point>  <type>  <mnt_flags and options>  <fs_mgr_flags>
+system                                          /system      erofs   ro                       wait,logical,avb=vbmeta,first_stage_mount,avb_keys=/avb/q-gsi.avbpubkey:/avb/r-gsi.avbpubkey:/avb/s-gsi.avbpubkey
+system                                          /system      ext4    ro                       wait,logical,avb=vbmeta,first_stage_mount,avb_keys=/avb/q-gsi.avbpubkey:/avb/r-gsi.avbpubkey:/avb/s-gsi.avbpubkey
+system_ext                                      /system_ext  erofs   ro                       wait,logical,first_stage_mount
+system_ext                                      /system_ext  ext4    ro                       wait,logical,first_stage_mount
+product                                         /product     erofs   ro                       wait,logical,first_stage_mount
+product                                         /product     ext4    ro                       wait,logical,first_stage_mount
+vendor                                          /vendor      erofs   ro                       wait,logical,avb=vbmeta,first_stage_mount
+vendor                                          /vendor      ext4    ro                       wait,logical,avb=vbmeta,first_stage_mount
+odm                                             /odm         erofs   ro                       wait,logical,first_stage_mount
+odm                                             /odm         ext4    ro                       wait,logical,first_stage_mount
+
+# Common partitions
+/dev/block/platform/bootdevice/by-name/misc      /misc        emmc    defaults                 defaults
+/dev/block/platform/bootdevice/by-name/metadata  /metadata    ext4    noatime,nosuid,nodev,discard wait,check,formattable,first_stage_mount
+/dev/block/platform/bootdevice/by-name/userdata  /data        ext4    noatime,nosuid,nodev,noauto_da_alloc,errors=panic wait,check,formattable,quota,resize,reservedsize=128m,fileencryption=aes-256-xts:aes-256-cts:v2,keydirectory=/metadata/vold/metadata_encryption
+/dev/block/platform/bootdevice/by-name/userdata  /data        f2fs    noatime,nosuid,nodev,discard wait,check,formattable,quota,resize,reservedsize=128m,fileencryption=aes-256-xts:aes-256-cts:v2,keydirectory=/metadata/vold/metadata_encryption

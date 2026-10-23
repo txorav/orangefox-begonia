@@ -140,6 +140,8 @@ AERA_USE_FSCRYPT_POLICY := 2
 TARGET_RECOVERY_PIXEL_FORMAT := "RGBX_8888"
 TARGET_RECOVERY_DEVICE_DIRS += $(DEVICE_PATH)
 TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery/root/system/etc/recovery.fstab
+TARGET_SCREEN_WIDTH := 1080
+TARGET_SCREEN_HEIGHT := 2340
 
 # Brightness and thermal hardware paths
 AERA_BRIGHTNESS_PATH := "/sys/class/leds/lcd-backlight/brightness"

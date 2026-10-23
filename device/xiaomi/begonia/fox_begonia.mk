@@ -50,6 +50,10 @@ OF_STATUS_INDENT_RIGHT := 48
 OF_HIDE_NOTCH := 1
 OF_CLOCK_POS := 1
 OF_OPTIONS_LIST_NUM := 12
+OF_ALLOW_DISABLE_NAVBAR := 1
+TARGET_SCREEN_WIDTH := 1080
+TARGET_SCREEN_HEIGHT := 2340
+OF_MAINTAINER := "txorav"
 
 # Keep log history only for non-stable builds.
 ifeq ($(FOX_BUILD_TYPE),Stable)
@@ -61,7 +65,7 @@ endif
 # ramdisk makes the bootloader hand the kernel an image it cannot unpack
 # (black screen / recovery bootloop). Keep the default gzip ramdisk.
 # OF_USE_LZMA_COMPRESSION := 1
-OF_SPLASH_MAX_SIZE := 130
+OF_SPLASH_MAX_SIZE := 4096
 
 # Use magiskboot for boot/recovery patching.
 OF_USE_MAGISKBOOT := 1

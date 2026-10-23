@@ -1,0 +1,30 @@
+#!/system/bin/sh
+#
+# Helper script to manually switch Begonia partition layout in recovery
+#
+
+MODE="$1"
+
+if [ "$MODE" = "dynamic" ]; then
+    echo "Switching to DYNAMIC partition layout (retrofitted super)..."
+    cp -f /system/etc/recovery.fstab.dynamic /system/etc/recovery.fstab
+    cp -f /system/etc/twrp.flags.dynamic /system/etc/twrp.flags
+    setprop ro.begonia.layout "dynamic"
+    setprop ro.boot.dynamic_partitions "true"
+    echo "Active layout is now: dynamic"
+    echo "Restarting recovery interface to reload partitions..."
+    pkill recovery || killall -9 recovery
+elif [ "$MODE" = "nondynamic" ] || [ "$MODE" = "non-dynamic" ]; then
+    echo "Switching to NON-DYNAMIC partition layout (physical partitions)..."
+    cp -f /system/etc/recovery.fstab.nondynamic /system/etc/recovery.fstab
+    cp -f /system/etc/twrp.flags.nondynamic /system/etc/twrp.flags
+    setprop ro.begonia.layout "nondynamic"
+    setprop ro.boot.dynamic_partitions "false"
+    echo "Active layout is now: nondynamic"
+    echo "Restarting recovery interface to reload partitions..."
+    pkill recovery || killall -9 recovery
+else
+    echo "Redmi Note 8 Pro (begonia) Partition Layout Switcher"
+    echo "Current active layout: $(getprop ro.begonia.layout)"
+    echo "Usage: switch_layout [dynamic | nondynamic]"
+fi

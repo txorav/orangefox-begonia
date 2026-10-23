@@ -1,0 +1,14 @@
+# Android fstab file for Non-Dynamic (traditional physical partitions) layout
+# Redmi Note 8 Pro (begonia)
+
+# <src>                                           <mnt_point>  <type>  <mnt_flags and options>  <fs_mgr_flags>
+/dev/block/platform/bootdevice/by-name/system    /system      erofs   ro                       wait,avb=vbmeta,first_stage_mount,avb_keys=/avb/q-gsi.avbpubkey:/avb/r-gsi.avbpubkey:/avb/s-gsi.avbpubkey
+/dev/block/platform/bootdevice/by-name/system    /system      ext4    ro                       wait,avb=vbmeta,first_stage_mount,avb_keys=/avb/q-gsi.avbpubkey:/avb/r-gsi.avbpubkey:/avb/s-gsi.avbpubkey
+/dev/block/platform/bootdevice/by-name/vendor    /vendor      erofs   ro                       wait,avb,first_stage_mount
+/dev/block/platform/bootdevice/by-name/vendor    /vendor      ext4    ro                       wait,avb,first_stage_mount
+
+# Common partitions
+/dev/block/platform/bootdevice/by-name/misc      /misc        emmc    defaults                 defaults
+/dev/block/platform/bootdevice/by-name/metadata  /metadata    ext4    noatime,nosuid,nodev,discard wait,check,formattable,first_stage_mount
+/dev/block/platform/bootdevice/by-name/userdata  /data        ext4    noatime,nosuid,nodev,noauto_da_alloc,errors=panic wait,check,formattable,quota,resize,reservedsize=128m,fileencryption=aes-256-xts:aes-256-cts:v2,keydirectory=/metadata/vold/metadata_encryption
+/dev/block/platform/bootdevice/by-name/userdata  /data        f2fs    noatime,nosuid,nodev,discard wait,check,formattable,quota,resize,reservedsize=128m,fileencryption=aes-256-xts:aes-256-cts:v2,keydirectory=/metadata/vold/metadata_encryption

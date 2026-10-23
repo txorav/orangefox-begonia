@@ -3,6 +3,12 @@ import /init.recovery.wifi.rc
 
 on early-init
     start adbd
+    mkdir /Fox 0777 root root
+    mkdir /Fox/FoxFiles 0777 root root
+    mkdir /Fox/theme 0777 root root
+    mkdir /tmp/Fox 0777 root root
+    mkdir /tmp/Fox/FoxFiles 0777 root root
+    mkdir /tmp/Fox/theme 0777 root root
 
 on init
     # Create a more standard /dev/block layout for our scripts
@@ -12,6 +18,8 @@ on init
     export CURL_CA_BUNDLE /system/etc/security/cacert.pem
     start hwservicemanager
     start servicemanager
+    # Auto-detect dynamic vs non-dynamic partition layout
+    exec u:r:recovery:s0 -- /system/bin/detect_partition_layout.sh
 
 on boot
     start hwservicemanager
