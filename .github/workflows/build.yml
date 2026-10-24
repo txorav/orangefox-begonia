@@ -254,6 +254,22 @@ jobs:
           path: ${{ env.SRC_DIR }}/build.log
           if-no-files-found: ignore
 
+      - name: Package Fox Addons into OrangeFox Zip
+        if: success()
+        run: |
+          OUT_DIR="${{ env.SRC_DIR }}/out/target/product/begonia"
+          ADDONS_DIR="device/xiaomi/begonia/addons"
+          for z in "$OUT_DIR"/OrangeFox-*.zip; do
+            [ -f "$z" ] || continue
+            echo "Injecting Fox Addons into $z..."
+            STAGE=$(mktemp -d)
+            mkdir -p "$STAGE/sdcard/Fox/FoxFiles/FoxAddons"
+            cp -f "$ADDONS_DIR"/*.zip "$STAGE/sdcard/Fox/FoxFiles/FoxAddons/"
+            (cd "$STAGE" && zip -u "$z" sdcard/Fox/FoxFiles/FoxAddons/*.zip)
+            rm -rf "$STAGE"
+            md5sum "$z" | awk '{print $1}' > "${z}.md5"
+          done
+
       - name: Upload recovery artifacts
         if: success()
         uses: actions/upload-artifact@v4
