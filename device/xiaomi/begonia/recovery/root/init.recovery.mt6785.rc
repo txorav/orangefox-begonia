@@ -4,8 +4,6 @@ import /init.recovery.wifi.rc
 on early-init
     setprop service.adb.tcp.port 5555
     setprop keymaster_ver 4.0
-    setprop ro.crypto.volume.options aes-256-xts:aes-256-cts:v1
-    setprop ro.crypto.volume.filenames_mode aes-256-cts:v1
     start adbd
     mkdir /Fox 0777 root root
     mkdir /Fox/FoxFiles 0777 root root

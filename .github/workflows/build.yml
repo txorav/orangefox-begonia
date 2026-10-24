@@ -217,7 +217,17 @@ jobs:
             exit 1
           fi
           export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE
-          mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
+          mka -j"$BUILD_JOBS" libssl $BUILD_TARGET 2>&1 | tee -a build.log
+
+          # Ensure libssl.so is bundled into recovery ramdisk for wpa_supplicant
+          REC_ROOT="out/target/product/begonia/recovery/root/system/lib64"
+          SYS_LIB="out/target/product/begonia/system/lib64"
+          if [ -f "$SYS_LIB/libssl.so" ] && [ ! -f "$REC_ROOT/libssl.so" ]; then
+            echo "Relinking libssl.so into recovery ramdisk..."
+            mkdir -p "$REC_ROOT"
+            cp -fp "$SYS_LIB/libssl.so" "$REC_ROOT/"
+            mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
+          fi
 
       - name: Show ccache stats
         if: always()

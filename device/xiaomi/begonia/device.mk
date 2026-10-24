@@ -49,11 +49,13 @@ PRODUCT_PACKAGES += \
 # Wi-Fi for AERA PC Connection (wpa_supplicant, wpa_cli + MTK stack)
 PRODUCT_PACKAGES += \
     wpa_supplicant \
-    wpa_cli
+    wpa_cli \
+    libssl
 
 TARGET_RECOVERY_DEVICE_MODULES += \
     wpa_supplicant \
-    wpa_cli
+    wpa_cli \
+    libssl
 
 TW_RECOVERY_ADDITIONAL_RELINK_BINARY_FILES += \
     $(TARGET_OUT_VENDOR_EXECUTABLES)/hw/wpa_supplicant \
@@ -67,13 +69,13 @@ TW_RECOVERY_ADDITIONAL_RELINK_LIBRARY_FILES += \
     $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/libkeystore-wifi-hidl.so \
     $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/libkeystore-engine-wifi-hidl.so \
     $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/libnl.so \
-    $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/libssl.so
+    $(TARGET_OUT_SHARED_LIBRARIES)/libssl.so
 
 AERA_RECOVERY_ADDITIONAL_RELINK_LIBRARY_FILES += \
     $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/libkeystore-wifi-hidl.so \
     $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/libkeystore-engine-wifi-hidl.so \
     $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/libnl.so \
-    $(TARGET_OUT_VENDOR_SHARED_LIBRARIES)/libssl.so
+    $(TARGET_OUT_SHARED_LIBRARIES)/libssl.so
 
 # curl for downloading files in recovery
 ifneq ($(wildcard external/curl/Android.bp),)

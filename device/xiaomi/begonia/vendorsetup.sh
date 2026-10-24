@@ -61,8 +61,8 @@ if [ "$1" = "$FDEVICE" ] || [ "$AERA_BUILD_DEVICE" = "$FDEVICE" ] || [ "$FOX_BUI
 	export TARGET_SCREEN_HEIGHT=2340
 	export OF_USE_GREEN_LED=0
 	export OF_FLASHLIGHT_ENABLE=1
-	export OF_FL_PATH1=/sys/class/leds/torch-light0
-	export OF_FL_PATH2=/sys/class/leds/flashlight
+	export OF_FL_PATH1=/sys/class/leds/torch-light0/brightness
+	export OF_FL_PATH2=/sys/class/leds/flashlight/brightness
 	export OF_FLASHLIGHT_MAX_BRIGHTNESS=2047
 	export OF_THEME_DARK=1
 	export OF_ENABLE_THEME_ENGINE=1
