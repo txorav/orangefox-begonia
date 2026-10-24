@@ -1,0 +1,161 @@
+#!/system/bin/sh
+#
+# foxui / fox - Begonia Unified Native OrangeFox Recovery Control Panel & Dashboard
+#
+# Provides a full-screen, native, touch/keyboard-driven interactive recovery UI
+# directly in the built-in OrangeFox Recovery console / terminal.
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# ANSI Colors
+BOLD="\033[1m"
+GREEN="\033[32m"
+RED="\033[31m"
+YELLOW="\033[33m"
+CYAN="\033[36m"
+MAGENTA="\033[35m"
+ORANGE="\033[38;5;208m"
+WHITE="\033[37m"
+DIM="\033[2m"
+RESET="\033[0m"
+
+get_batt() {
+    cat /sys/class/power_supply/battery/capacity 2>/dev/null || echo "N/A"
+}
+
+get_wifi_status() {
+    if ifconfig wlan0 2>/dev/null | grep -q "inet addr\|inet "; then
+        echo -e "${GREEN}ONLINE${RESET}"
+    else
+        echo -e "${YELLOW}OFFLINE${RESET}"
+    fi
+}
+
+get_root_status() {
+    local r
+    r=$(/system/bin/rootmanager detect 2>/dev/null | head -n 1)
+    [ -z "$r" ] && r="None"
+    echo "$r"
+}
+
+get_containers_count() {
+    ls -1d /data/recovery/containers/* 2>/dev/null | wc -l || echo "0"
+}
+
+draw_header() {
+    clear 2>/dev/null || echo ""
+    echo -e "${ORANGE}${BOLD}╔══════════════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${ORANGE}${BOLD}║              ORANGEFOX RECOVERY UNIFIED CONTROL PANEL                ║${RESET}"
+    echo -e "${ORANGE}${BOLD}║              Device: Redmi Note 8 Pro (begonia / MT6785)             ║${RESET}"
+    echo -e "${ORANGE}${BOLD}╚══════════════════════════════════════════════════════════════════════╝${RESET}"
+    echo -e " Battery: ${BOLD}$(get_batt)%${RESET} | Wi-Fi: $(get_wifi_status) | Root: ${BOLD}$(get_root_status)${RESET} | Containers: ${BOLD}$(get_containers_count)${RESET}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"
+}
+
+main_loop() {
+    while true; do
+        draw_header
+        echo ""
+        echo -e "${CYAN}${BOLD}  [1] Wi-Fi Networking Manager${RESET}"
+        echo -e "      Scan access points, connect WPA2/WPA3/Open, link telemetry"
+        echo ""
+        echo -e "${CYAN}${BOLD}  [2] Linux Container Management Engine${RESET}"
+        echo -e "      Create in-RAM Linux containers, allocate RAM, shell terminal"
+        echo ""
+        echo -e "${CYAN}${BOLD}  [3] App & Data Manager${RESET}"
+        echo -e "      Backup APK + /data/data, restore, freeze/unfreeze, uninstall"
+        echo ""
+        echo -e "${CYAN}${BOLD}  [4] Universal Root & Module Manager${RESET}"
+        echo -e "      APatch, KernelSU, Magisk detection, safe mode, module manager"
+        echo ""
+        echo -e "${CYAN}${BOLD}  [5] Hardware, Battery & Fast Charging${RESET}"
+        echo -e "      Pump Express 4.0 (3.5A), Torch / Flashlight, Double Tap to Wake"
+        echo ""
+        echo -e "${CYAN}${BOLD}  [6] Multimedia & Audio Engine${RESET}"
+        echo -e "      ALSA speaker/headphone mixer routing, diagnostic sound tones"
+        echo ""
+        echo -e "${CYAN}${BOLD}  [7] Cellular Modem & Baseband Dialing${RESET}"
+        echo -e "      IMEI status, signal RSSI (AT+CSQ), ATD dialer"
+        echo ""
+        echo -e "${CYAN}${BOLD}  [8] In-RAM Linux OS & ZRAM Manager${RESET}"
+        echo -e "      1GB ZRAM compressed swap, pagecache drop, recmod modules"
+        echo ""
+        echo -e "${CYAN}${BOLD}  [9] Framebuffer Streaming (Scrcpy / Mirror)${RESET}"
+        echo -e "      Stream recovery framebuffer over USB/Wi-Fi to PC"
+        echo ""
+        echo -e "${CYAN}${BOLD}  [0] Take Screenshot${RESET}"
+        echo -e "      Capture recovery screen directly to /sdcard/Pictures/Screenshots/"
+        echo ""
+        echo -e "${RED}${BOLD}  [q] Exit to Recovery Terminal Shell${RESET}"
+        echo ""
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"
+        printf "${BOLD}Select Menu Option [0-9, q]: ${RESET}"
+        read -r choice || break
+        case "$choice" in
+            1)
+                /system/bin/foxwifi menu
+                ;;
+            2)
+                /system/bin/foxcontainer menu
+                ;;
+            3)
+                /system/bin/appmanager menu
+                ;;
+            4)
+                /system/bin/rootmanager menu
+                ;;
+            5)
+                /system/bin/fastcharge menu
+                ;;
+            6)
+                echo ""
+                echo "1. Play Diagnostic Audio Tone"
+                echo "2. Stop Audio"
+                echo "3. Set Volume (0-100)"
+                printf "Choice: "; read -r ac
+                case "$ac" in
+                    1) /system/bin/foxaudio test; sleep 2 ;;
+                    2) /system/bin/foxaudio stop; sleep 1 ;;
+                    3) printf "Volume %: "; read -r v; /system/bin/foxaudio volume "$v"; sleep 1 ;;
+                esac
+                ;;
+            7)
+                echo ""
+                echo "1. Check Modem State & Devices"
+                echo "2. Check Signal Strength (AT+CSQ)"
+                echo "3. Query SIM Status (AT+CPIN?)"
+                echo "4. Send Emergency Dial (ATD)"
+                printf "Choice: "; read -r mc
+                case "$mc" in
+                    1) /system/bin/foxcall status; echo "Press Enter..."; read -r _ ;;
+                    2) /system/bin/foxcall signal; echo "Press Enter..."; read -r _ ;;
+                    3) /system/bin/foxcall sim; echo "Press Enter..."; read -r _ ;;
+                    4) printf "Enter phone number: "; read -r pn; /system/bin/foxcall dial "$pn"; sleep 2 ;;
+                esac
+                ;;
+            8)
+                /system/bin/recmod menu
+                ;;
+            9)
+                /system/bin/foxscrcpy guide
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            0)
+                /system/bin/screenshot
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            q|quit|exit)
+                echo "Exiting OrangeFox Control Panel."
+                break
+                ;;
+            *)
+                echo -e "${RED}Invalid selection.${RESET}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+main_loop

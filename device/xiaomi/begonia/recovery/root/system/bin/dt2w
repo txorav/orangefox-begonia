@@ -1,0 +1,140 @@
+#!/system/bin/sh
+#
+# dt2w - Begonia Double Tap to Wake & Gesture Controller
+#
+# Supports Novatek NT36672A & FocalTech FT8719 touchscreen controllers on Begonia.
+#
+# Usage:
+#   dt2w on
+#   dt2w off
+#   dt2w toggle
+#   dt2w status [--json]
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# Candidate driver sysfs nodes on Begonia
+CANDIDATE_NODES="
+/sys/android_touch/doubletap2wake
+/sys/devices/platform/11007000.i2c/i2c-1/1-0038/fts_gesture_mode
+/sys/bus/i2c/drivers/fts_ts/1-0038/fts_gesture_mode
+/sys/devices/platform/11007000.i2c/i2c-1/1-0062/double_tap2wake
+/sys/class/touch/touch_dev/gesture_enable
+/sys/devices/virtual/touch/touch_dev/gesture_enable
+/proc/touchpanel/double_tap_enable
+"
+
+find_node() {
+    for node in $CANDIDATE_NODES; do
+        if [ -f "$node" ]; then
+            echo "$node"
+            return 0
+        fi
+    done
+    # Fallback to standard android_touch node
+    echo "/sys/android_touch/doubletap2wake"
+}
+
+NODE=$(find_node)
+
+get_current() {
+    if [ -f "$NODE" ]; then
+        cat "$NODE" 2>/dev/null || echo 0
+    else
+        echo 0
+    fi
+}
+
+set_state() {
+    local val="$1"
+    # Write to detected node
+    if [ -w "$NODE" ] || [ -f "$NODE" ]; then
+        echo "$val" > "$NODE" 2>/dev/null
+    fi
+    # Also write to all existing candidate nodes
+    for node in $CANDIDATE_NODES; do
+        if [ -f "$node" ] && [ "$node" != "$NODE" ]; then
+            echo "$val" > "$node" 2>/dev/null || true
+        fi
+    done
+}
+
+status() {
+    local cur
+    cur=$(get_current)
+    local state="disabled"
+    [ "$cur" -gt 0 ] && state="enabled"
+
+    if [ "$1" = "--json" ] || [ "$1" = "-j" ]; then
+        printf '{"status":"ok","node":"%s","state":"%s","value":%d}\n' \
+            "$NODE" "$state" "$cur"
+    else
+        echo "Double Tap to Wake : $state"
+        echo "Control Node       : $NODE"
+        echo "Raw Value          : $cur"
+    fi
+}
+
+interactive_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        status
+        echo ""
+        echo "Double Tap to Wake Actions:"
+        echo "  [1] Enable Double Tap to Wake"
+        echo "  [2] Disable Double Tap to Wake"
+        echo "  [3] Toggle DT2W"
+        echo "  [q] Return"
+        echo ""
+        printf "dt2w > "
+        read -r dc || break
+        case "$dc" in
+            1) set_state 1; sleep 1 ;;
+            2) set_state 0; sleep 1 ;;
+            3)
+                cur=$(get_current)
+                [ "$cur" -gt 0 ] && set_state 0 || set_state 1
+                sleep 1
+                ;;
+            q|quit|exit) break ;;
+        esac
+    done
+}
+
+case "$1" in
+    on|enable|1)
+        set_state 1
+        echo "Double Tap to Wake ENABLED"
+        ;;
+    off|disable|0)
+        set_state 0
+        echo "Double Tap to Wake DISABLED"
+        ;;
+    toggle)
+        cur=$(get_current)
+        if [ "$cur" -gt 0 ]; then
+            set_state 0
+            echo "Double Tap to Wake DISABLED"
+        else
+            set_state 1
+            echo "Double Tap to Wake ENABLED"
+        fi
+        ;;
+    status)
+        status "$2"
+        ;;
+    menu|"")
+        interactive_menu
+        ;;
+    *)
+        cat <<EOF
+Usage: dt2w [on|off|toggle|status|menu]
+  on       Enable double tap to wake
+  off      Disable double tap to wake
+  toggle   Toggle double tap to wake
+  status   Show current DT2W status
+  menu     Launch interactive recovery DT2W manager
+EOF
+        ;;
+esac

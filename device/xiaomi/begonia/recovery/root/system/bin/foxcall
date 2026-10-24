@@ -1,0 +1,96 @@
+#!/system/bin/sh
+#
+# foxcall - Begonia Recovery Cellular Modem & Dialer Engine
+#
+# Interacts with MediaTek MT6785 Helio G90T Baseband / RIL modem interface.
+#
+# Usage:
+#   foxcall dial <number>
+#   foxcall hangup
+#   foxcall signal
+#   foxcall sim
+#   foxcall cmd <AT_COMMAND>
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# Candidate MediaTek Modem TTY interfaces
+MODEM_DEVS="
+/dev/radio/ptty1
+/dev/ttyC0
+/dev/ccci_fs
+/dev/radio/ptty0
+"
+
+find_modem_dev() {
+    for dev in $MODEM_DEVS; do
+        if [ -c "$dev" ]; then
+            echo "$dev"
+            return 0
+        fi
+    done
+    echo "/dev/radio/ptty1"
+}
+
+MODEM=$(find_modem_dev)
+
+send_at() {
+    local cmd="$1"
+    if [ ! -c "$MODEM" ]; then
+        echo "Modem device $MODEM unavailable (Baseband offline in recovery)."
+        return 1
+    fi
+
+    # Configure serial baud and raw mode
+    stty -F "$MODEM" 115200 raw -echo 2>/dev/null || true
+
+    # Send command and capture output (timeout 2s)
+    (
+        echo -e "$cmd\r" > "$MODEM"
+    ) &
+    local p=$!
+    cat < "$MODEM" &
+    local cp=$!
+    sleep 1
+    kill $p $cp 2>/dev/null || true
+}
+
+case "$1" in
+    dial|call)
+        num="$2"
+        [ -z "$num" ] && { echo "Usage: foxcall dial <number>"; exit 1; }
+        echo "Dialing $num on Baseband..."
+        send_at "ATD${num};"
+        ;;
+    hangup|end)
+        echo "Hanging up call..."
+        send_at "ATH"
+        ;;
+    signal|csq)
+        echo "Checking modem signal strength (AT+CSQ)..."
+        send_at "AT+CSQ"
+        ;;
+    sim|pin)
+        echo "Checking SIM status (AT+CPIN?)..."
+        send_at "AT+CPIN?"
+        ;;
+    cmd|raw)
+        shift
+        send_at "$*"
+        ;;
+    status|"")
+        echo "MediaTek MT6785 Modem Interface: $MODEM"
+        [ -c "$MODEM" ] && echo "State: ONLINE / AVAILABLE" || echo "State: STANDBY"
+        ;;
+    *)
+        cat <<EOF
+Usage: foxcall [dial|hangup|signal|sim|cmd|status]
+  dial <number>   Initiate phone/emergency call via ATD
+  hangup          Terminate current call via ATH
+  signal          Query RSSI signal strength (AT+CSQ)
+  sim             Query SIM card state (AT+CPIN?)
+  cmd <AT_CMD>    Execute arbitrary AT command
+EOF
+        ;;
+esac

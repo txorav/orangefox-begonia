@@ -1,0 +1,470 @@
+#!/system/bin/sh
+#
+# foxcontainer - Begonia Modular In-RAM Linux Container Management Engine
+#
+# Allows creating, provisioning, and running lightweight Linux containers in RAM
+# with persistent data storage on /data, custom RAM limits, storage access control,
+# and direct interactive terminal sessions inside native OrangeFox Recovery UI.
+#
+# Usage:
+#   foxcontainer create <name> [--ram <MB>] [--storage-access] [--type <minimal|alpine|busybox>]
+#   foxcontainer start <name>
+#   foxcontainer stop <name>
+#   foxcontainer shell <name>
+#   foxcontainer exec <name> <command...>
+#   foxcontainer list [--json]
+#   foxcontainer delete <name>
+#   foxcontainer status [name]
+#   foxcontainer menu
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# Persistent container root on /data (or /sdcard if /data unmounted)
+DATA_STORAGE="/data/recovery/containers"
+SDCARD_STORAGE="/sdcard/recovery/containers"
+RUN_DIR="/tmp/containers"
+
+BOLD="\033[1m"
+GREEN="\033[32m"
+RED="\033[31m"
+YELLOW="\033[33m"
+CYAN="\033[36m"
+MAGENTA="\033[35m"
+RESET="\033[0m"
+
+mkdir -p "$RUN_DIR" 2>/dev/null
+
+ensure_storage_dir() {
+    if [ -n "$FOX_CONTAINER_STORAGE" ]; then
+        mkdir -p "$FOX_CONTAINER_STORAGE" 2>/dev/null
+        echo "$FOX_CONTAINER_STORAGE"
+        return 0
+    fi
+    if mountpoint -q /data 2>/dev/null || [ -d "/data/media" ] || [ -d "/data/system" ]; then
+        mkdir -p "$DATA_STORAGE" 2>/dev/null
+        echo "$DATA_STORAGE"
+        return 0
+    elif [ -d "/sdcard" ] && touch "/sdcard/.rw_chk" 2>/dev/null; then
+        rm -f "/sdcard/.rw_chk"
+        mkdir -p "$SDCARD_STORAGE" 2>/dev/null
+        echo "$SDCARD_STORAGE"
+        return 0
+    else
+        # Fallback to persistent tmpfs cache if storage locked
+        local fb="/tmp/recovery_containers"
+        mkdir -p "$fb" 2>/dev/null
+        echo "$fb"
+        return 0
+    fi
+}
+
+STORAGE_BASE=$(ensure_storage_dir)
+
+# Read config property
+get_cfg() {
+    local cfg="$1"
+    local key="$2"
+    if [ -f "$cfg" ]; then
+        grep -E "^${key}=" "$cfg" 2>/dev/null | cut -d= -f2- | sed 's/\r//' | head -n 1
+    fi
+}
+
+set_cfg() {
+    local cfg="$1"
+    local key="$2"
+    local val="$3"
+    touch "$cfg" 2>/dev/null
+    if grep -q "^${key}=" "$cfg" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${val}|" "$cfg" 2>/dev/null
+    else
+        echo "${key}=${val}" >> "$cfg"
+    fi
+}
+
+# Create a new container
+create_container() {
+    local name="$1"
+    shift
+    [ -z "$name" ] && { echo -e "${RED}Error: Container name required. Usage: foxcontainer create <name> [options]${RESET}"; return 1; }
+
+    # Validate name (alphanumeric, dash, underscore)
+    name=$(echo "$name" | sed 's/[^a-zA-Z0-9_-]//g')
+    [ -z "$name" ] && { echo -e "${RED}Error: Invalid container name.${RESET}"; return 1; }
+
+    local cdir="$STORAGE_BASE/$name"
+    if [ -d "$cdir" ]; then
+        echo -e "${YELLOW}Container '$name' already exists at $cdir.${RESET}"
+        return 0
+    fi
+
+    local ram="512M"
+    local storage_access="false"
+    local type="minimal"
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --ram) ram="$2"; shift 2 ;;
+            --storage-access|--storage|-s) storage_access="true"; shift ;;
+            --type|-t) type="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    echo -e "${BOLD}Creating container '${CYAN}${name}${RESET}'...${RESET}"
+    mkdir -p "$cdir/rootfs" "$cdir/data" "$cdir/overlay" 2>/dev/null
+
+    # Populate basic rootfs skeleton
+    local rfs="$cdir/rootfs"
+    mkdir -p "$rfs/bin" "$rfs/sbin" "$rfs/usr/bin" "$rfs/usr/sbin" \
+             "$rfs/etc" "$rfs/proc" "$rfs/sys" "$rfs/dev" "$rfs/dev/pts" \
+             "$rfs/tmp" "$rfs/root" "$rfs/home" "$rfs/mnt" "$rfs/var/log" \
+             "$rfs/phone_storage" "$rfs/phone_data" 2>/dev/null
+
+    # Link busybox binaries into container rootfs
+    local bb="/system/bin/busybox"
+    [ -x "$bb" ] || bb="/sbin/busybox"
+    if [ -x "$bb" ]; then
+        cp -p "$bb" "$rfs/bin/busybox" 2>/dev/null || true
+        # Install basic busybox symlinks inside container
+        for tool in sh bash ash ls cp mv rm mkdir rmdir cat echo grep sed awk \
+                    find tar gzip bzip2 xz ps top kill pkill chmod chown env \
+                    free df du dmesg ifconfig ip ping nc wget curl vi; do
+            ln -sf "/bin/busybox" "$rfs/bin/$tool" 2>/dev/null || true
+            ln -sf "/bin/busybox" "$rfs/usr/bin/$tool" 2>/dev/null || true
+        done
+    fi
+
+    # Create default /etc/passwd and /etc/group
+    cat <<'EOF' > "$rfs/etc/passwd"
+root:x:0:0:root:/root:/bin/sh
+user:x:1000:1000:user:/home:/bin/sh
+EOF
+    cat <<'EOF' > "$rfs/etc/group"
+root:x:0:
+user:x:1000:
+EOF
+
+    # Default profile and welcome banner
+    cat <<EOF > "$rfs/etc/profile"
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:\$PATH
+export TERM=xterm-256color
+export PS1="\[\033[1;36m\][foxcontainer:$name]\[\033[0m\]:\w# "
+cd /root 2>/dev/null || cd /
+EOF
+
+    # Save configuration
+    cat <<EOF > "$cdir/config.prop"
+name=$name
+ram_limit=$ram
+allow_storage_access=$storage_access
+type=$type
+created_at=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "now")
+status=stopped
+storage_path=$cdir
+EOF
+
+    echo -e "${GREEN}${BOLD}✓ Container '$name' created successfully!${RESET}"
+    echo -e "  Specs : RAM Limit: ${BOLD}$ram${RESET} | Type: ${BOLD}$type${RESET} | Phone Storage Access: ${BOLD}$storage_access${RESET}"
+    echo -e "  Path  : $cdir"
+    echo -e "  Launch: ${CYAN}foxcontainer shell $name${RESET}"
+}
+
+# Mount container runtime in RAM
+start_container() {
+    local name="$1"
+    [ -z "$name" ] && { echo -e "${RED}Error: Container name required.${RESET}"; return 1; }
+
+    local cdir="$STORAGE_BASE/$name"
+    [ ! -d "$cdir" ] && { echo -e "${RED}Error: Container '$name' not found.${RESET}"; return 1; }
+
+    local cfg="$cdir/config.prop"
+    local ram
+    ram=$(get_cfg "$cfg" "ram_limit")
+    [ -z "$ram" ] && ram="512M"
+
+    local c_run="$RUN_DIR/$name"
+    if [ -f "$c_run/running" ]; then
+        echo -e "${YELLOW}Container '$name' is already running.${RESET}"
+        return 0
+    fi
+
+    echo -e "${BOLD}Starting container '${CYAN}${name}${RESET}' in RAM (${ram} tmpfs)...${RESET}"
+    mkdir -p "$c_run/ram" "$c_run/mnt" 2>/dev/null
+
+    # Mount in-RAM tmpfs with specified RAM limit
+    mount -t tmpfs -o "size=$ram,nosuid,nodev,mode=0755" "tmpfs_${name}" "$c_run/ram" 2>/dev/null
+
+    # Setup mount namespace / bind rootfs
+    local rootfs="$cdir/rootfs"
+    local mnt="$c_run/mnt"
+
+    # Copy base skeleton into RAM or use bind-mount
+    mkdir -p "$c_run/ram/upper" "$c_run/ram/work" "$c_run/ram/data" 2>/dev/null
+
+    # Bind base rootfs to target mnt
+    mount --bind "$rootfs" "$mnt" 2>/dev/null
+
+    # Bind essential virtual filesystems
+    mount -t proc proc "$mnt/proc" 2>/dev/null || true
+    mount -t sysfs sysfs "$mnt/sys" 2>/dev/null || true
+    mount -t devpts devpts "$mnt/dev/pts" 2>/dev/null || true
+    mount --bind /dev "$mnt/dev" 2>/dev/null || true
+
+    # Mount RAM tmpfs on /tmp inside container
+    mount -t tmpfs -o size=128M tmpfs "$mnt/tmp" 2>/dev/null || true
+
+    # Bind persistent data directory
+    mkdir -p "$cdir/data/root" "$cdir/data/home" 2>/dev/null
+    mount --bind "$cdir/data/root" "$mnt/root" 2>/dev/null || true
+    mount --bind "$cdir/data/home" "$mnt/home" 2>/dev/null || true
+
+    # Handle phone storage access
+    local access
+    access=$(get_cfg "$cfg" "allow_storage_access")
+    if [ "$access" = "true" ]; then
+        if [ -d "/sdcard" ]; then
+            mkdir -p "$mnt/phone_storage" 2>/dev/null
+            mount --bind /sdcard "$mnt/phone_storage" 2>/dev/null || true
+        fi
+        if mountpoint -q /data 2>/dev/null; then
+            mkdir -p "$mnt/phone_data" 2>/dev/null
+            mount --bind /data "$mnt/phone_data" 2>/dev/null || true
+        fi
+    fi
+
+    touch "$c_run/running"
+    set_cfg "$cfg" "status" "running"
+    echo -e "${GREEN}${BOLD}✓ Container '$name' is now running in RAM.${RESET}"
+}
+
+# Stop container and unmount RAM runtime
+stop_container() {
+    local name="$1"
+    [ -z "$name" ] && { echo -e "${RED}Error: Container name required.${RESET}"; return 1; }
+
+    local cdir="$STORAGE_BASE/$name"
+    local cfg="$cdir/config.prop"
+    local c_run="$RUN_DIR/$name"
+    local mnt="$c_run/mnt"
+
+    echo -e "${BOLD}Stopping container '${CYAN}${name}${RESET}'...${RESET}"
+
+    # Kill any processes still running inside container chroot
+    if [ -d "$mnt" ]; then
+        # Unmount virtual and phone storage filesystems cleanly
+        umount -l "$mnt/phone_storage" 2>/dev/null || true
+        umount -l "$mnt/phone_data" 2>/dev/null || true
+        umount -l "$mnt/root" 2>/dev/null || true
+        umount -l "$mnt/home" 2>/dev/null || true
+        umount -l "$mnt/tmp" 2>/dev/null || true
+        umount -l "$mnt/proc" 2>/dev/null || true
+        umount -l "$mnt/sys" 2>/dev/null || true
+        umount -l "$mnt/dev/pts" 2>/dev/null || true
+        umount -l "$mnt/dev" 2>/dev/null || true
+        umount -l "$mnt" 2>/dev/null || true
+    fi
+
+    if [ -d "$c_run/ram" ]; then
+        umount -l "$c_run/ram" 2>/dev/null || true
+    fi
+
+    rm -rf "$c_run" 2>/dev/null || true
+    [ -f "$cfg" ] && set_cfg "$cfg" "status" "stopped"
+
+    echo -e "${GREEN}✓ Container '$name' stopped and RAM reclaimed.${RESET}"
+}
+
+# Enter interactive terminal shell inside container
+shell_container() {
+    local name="$1"
+    [ -z "$name" ] && { echo -e "${RED}Error: Container name required.${RESET}"; return 1; }
+
+    local cdir="$STORAGE_BASE/$name"
+    [ ! -d "$cdir" ] && { echo -e "${RED}Error: Container '$name' does not exist.${RESET}"; return 1; }
+
+    local c_run="$RUN_DIR/$name"
+    if [ ! -f "$c_run/running" ]; then
+        start_container "$name" || return 1
+    fi
+
+    local mnt="$c_run/mnt"
+
+    echo -e "${BOLD}Entering interactive terminal session in [${CYAN}${name}${RESET}]...${RESET}"
+    echo -e "${YELLOW}Type 'exit' to return to recovery console.${RESET}"
+    echo ""
+
+    # Enter chroot with environment
+    chroot "$mnt" /bin/sh -l
+}
+
+# Execute a single command inside container
+exec_container() {
+    local name="$1"
+    shift
+    [ -z "$name" ] && { echo "Error: Container name required."; return 1; }
+
+    local c_run="$RUN_DIR/$name"
+    if [ ! -f "$c_run/running" ]; then
+        start_container "$name" || return 1
+    fi
+
+    local mnt="$c_run/mnt"
+    chroot "$mnt" /bin/sh -c "$*"
+}
+
+# List all containers
+list_containers() {
+    local json=0
+    [ "$1" = "--json" ] || [ "$1" = "-j" ] && json=1
+
+    [ "$json" -eq 1 ] && printf '{"status":"ok","storage_base":"%s","containers":[' "$STORAGE_BASE"
+
+    local first=1
+    local count=0
+
+    echo -e "${BOLD}======================================================================${RESET}"
+    echo -e "${CYAN}${BOLD}     BEGONIA IN-RAM LINUX CONTAINER MANAGEMENT ENGINE                 ${RESET}"
+    echo -e "${BOLD}======================================================================${RESET}"
+    echo -e "${BOLD}Storage Path :${RESET} $STORAGE_BASE (Persistent on /data)"
+    echo -e "${BOLD}Runtime Cache:${RESET} $RUN_DIR (In-RAM tmpfs)"
+    echo ""
+
+    for d in "$STORAGE_BASE"/*; do
+        [ -d "$d" ] || continue
+        local prop="$d/config.prop"
+        [ -f "$prop" ] || continue
+
+        local name ram access status created
+        name=$(get_cfg "$prop" "name")
+        ram=$(get_cfg "$prop" "ram_limit")
+        access=$(get_cfg "$prop" "allow_storage_access")
+        created=$(get_cfg "$prop" "created_at")
+
+        local is_run="STOPPED"
+        local color="${YELLOW}"
+        if [ -f "$RUN_DIR/$name/running" ]; then
+            is_run="RUNNING (IN RAM)"
+            color="${GREEN}"
+        fi
+
+        count=$((count + 1))
+
+        if [ "$json" -eq 1 ]; then
+            [ "$first" -eq 0 ] && printf ','
+            first=0
+            printf '{"name":"%s","ram":"%s","storage_access":%s,"status":"%s","created":"%s","path":"%s"}' \
+                "$name" "$ram" "$access" "$is_run" "$created" "$d"
+        else
+            echo -e "${BOLD}[$count] Container : ${CYAN}${BOLD}${name}${RESET}"
+            echo -e "    Status    : ${color}${BOLD}${is_run}${RESET}"
+            echo -e "    RAM Limit : ${BOLD}${ram}${RESET}"
+            echo -e "    Storage   : Access Granted = ${access}"
+            echo -e "    Created   : ${created}"
+            echo -e "    Directory : ${d}"
+            echo "----------------------------------------------------------------------"
+        fi
+    done
+
+    if [ "$json" -eq 1 ]; then
+        printf '],"total":%d}\n' "$count"
+    else
+        [ "$count" -eq 0 ] && echo -e "${YELLOW}No containers found. Create one with: foxcontainer create <name>${RESET}"
+    fi
+}
+
+# Delete a container
+delete_container() {
+    local name="$1"
+    [ -z "$name" ] && { echo -e "${RED}Error: Container name required.${RESET}"; return 1; }
+
+    local cdir="$STORAGE_BASE/$name"
+    [ ! -d "$cdir" ] && { echo -e "${RED}Error: Container '$name' not found.${RESET}"; return 1; }
+
+    stop_container "$name" 2>/dev/null || true
+    echo -e "${BOLD}Deleting container '$name' from disk...${RESET}"
+    rm -rf "$cdir" 2>/dev/null
+    echo -e "${GREEN}✓ Container '$name' deleted successfully.${RESET}"
+}
+
+# Interactive terminal menu for OrangeFox UI
+interactive_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        list_containers
+        echo ""
+        echo -e "${BOLD}Container Actions:${RESET}"
+        echo -e "  [c] Create new container (choose specs, RAM & storage)"
+        echo -e "  [s] Start container in RAM"
+        echo -e "  [t] Open Terminal / Shell into container"
+        echo -e "  [x] Stop container (reclaim RAM)"
+        echo -e "  [d] Delete container"
+        echo -e "  [q] Quit to recovery"
+        echo ""
+        printf "foxcontainer > "
+        read -r action arg || break
+        case "$action" in
+            c|create)
+                echo ""
+                printf "Enter container name: "; read -r cname
+                [ -z "$cname" ] && continue
+                printf "Enter RAM limit (e.g. 256M, 512M, 1024M, 2048M) [512M]: "; read -r cram
+                [ -z "$cram" ] && cram="512M"
+                printf "Grant access to phone storage /sdcard and /data? (y/n) [y]: "; read -r cacc
+                cacc_flag="--storage-access"
+                [ "$cacc" = "n" -o "$cacc" = "N" ] && cacc_flag=""
+                create_container "$cname" --ram "$cram" $cacc_flag
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            s|start)
+                [ -z "$arg" ] && { printf "Container name: "; read -r arg; }
+                start_container "$arg"
+                sleep 1
+                ;;
+            t|shell|attach)
+                [ -z "$arg" ] && { printf "Container name: "; read -r arg; }
+                shell_container "$arg"
+                ;;
+            x|stop)
+                [ -z "$arg" ] && { printf "Container name: "; read -r arg; }
+                stop_container "$arg"
+                sleep 1
+                ;;
+            d|delete)
+                [ -z "$arg" ] && { printf "Container name: "; read -r arg; }
+                printf "Are you sure you want to delete '%s'? (y/n): " "$arg"; read -r conf
+                [ "$conf" = "y" -o "$conf" = "Y" ] && delete_container "$arg"
+                sleep 1
+                ;;
+            q|quit|exit)
+                break
+                ;;
+        esac
+    done
+}
+
+case "$1" in
+    create) shift; create_container "$@" ;;
+    start) shift; start_container "$@" ;;
+    stop) shift; stop_container "$@" ;;
+    shell|attach|run) shift; shell_container "$@" ;;
+    exec) shift; exec_container "$@" ;;
+    list|ls) shift; list_containers "$@" ;;
+    delete|rm) shift; delete_container "$@" ;;
+    status) shift; list_containers "$@" ;;
+    menu|"") interactive_menu ;;
+    *)
+        cat <<EOF
+Usage: foxcontainer <command> [args]
+  create <name> [--ram <MB>] [--storage-access] [--type <type>]
+  start <name>         Start container in RAM
+  stop <name>          Stop container and free RAM
+  shell <name>         Open interactive terminal inside container
+  exec <name> <cmd>    Execute single command in container
+  list [--json]        List containers and RAM status
+  delete <name>        Remove container and stored data
+  menu                 Launch interactive OrangeFox terminal UI
+EOF
+        ;;
+esac

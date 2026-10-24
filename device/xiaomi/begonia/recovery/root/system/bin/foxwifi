@@ -1018,6 +1018,53 @@ Usage: foxwifi <command> [args]
 EOF
 }
 
+interactive_wifi_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        echo -e "${BOLD}======================================================================${RESET}"
+        echo -e "${CYAN}${BOLD}                 ORANGEFOX NATIVE WI-FI MANAGER                       ${RESET}"
+        echo -e "${BOLD}======================================================================${RESET}"
+        cmd_status
+        echo ""
+        echo -e "${BOLD}Wi-Fi Actions:${RESET}"
+        echo -e "  [1] Turn Wi-Fi ON"
+        echo -e "  [2] Turn Wi-Fi OFF"
+        echo -e "  [3] Scan for Networks"
+        echo -e "  [4] Connect to Network (SSID + Password)"
+        echo -e "  [5] Disconnect Active Network"
+        echo -e "  [6] Auto-Connect Saved Network"
+        echo -e "  [7] Save Current Network Config"
+        echo -e "  [8] Forget Saved Network"
+        echo -e "  [9] Diagnostic Hardware Report"
+        echo -e "  [0] View Wi-Fi Log"
+        echo -e "  [q] Return to Recovery Console"
+        echo ""
+        printf "foxwifi > "
+        read -r choice || break
+        case "$choice" in
+            1) cmd_on; sleep 2 ;;
+            2) cmd_off; sleep 2 ;;
+            3) cmd_scan; echo "Press Enter to continue..."; read -r _ ;;
+            4)
+                printf "Enter SSID: "; read -r m_ssid
+                [ -z "$m_ssid" ] && continue
+                printf "Enter Password (leave blank for OPEN): "; read -r m_pass
+                printf "Security [WPA2/WPA3/OPEN] (default: WPA2): "; read -r m_sec
+                [ -z "$m_sec" ] && m_sec="WPA2"
+                connect_network "$m_ssid" "$m_pass" "$m_sec"
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            5) disconnect_network; sleep 1 ;;
+            6) cmd_auto; sleep 2 ;;
+            7) cmd_save; sleep 1 ;;
+            8) cmd_forget; sleep 1 ;;
+            9) cmd_diag; echo "Press Enter to continue..."; read -r _ ;;
+            0) tail -n 40 "$LOG" 2>/dev/null; echo "Press Enter to continue..."; read -r _ ;;
+            q|quit|exit) break ;;
+        esac
+    done
+}
+
 case "$1" in
     on|start)
         take_lock || exit 1
@@ -1097,6 +1144,9 @@ case "$1" in
         ;;
     init)
         cmd_on
+        ;;
+    menu|"")
+        interactive_wifi_menu
         ;;
     *)
         usage

@@ -1,0 +1,6 @@
+id=touch_dt2w
+name=Double Tap to Wake (DT2W)
+version=1.0.0
+author=Unified
+category=input
+description=Novatek & FocalTech Double Tap to Wake driver extension for Begonia

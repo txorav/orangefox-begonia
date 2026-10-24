@@ -1,0 +1,6 @@
+id=audio_music
+name=Begonia ALSA Audio Engine
+version=1.0.0
+author=Unified
+category=multimedia
+description=MediaTek MT6785 ALSA audio mixer routing and PCM sound engine

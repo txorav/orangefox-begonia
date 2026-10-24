@@ -1,0 +1,55 @@
+#!/system/bin/sh
+#
+# screenshot - Begonia Recovery Framebuffer Capture Utility
+#
+# Captures active recovery screen to PNG or raw buffer.
+#
+# Usage:
+#   screenshot [output_path.png]
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# Determine default destination directory
+DEST_DIR="/sdcard/Pictures/Screenshots"
+if [ ! -d "/sdcard" ] || ! touch "/sdcard/.test_rw" 2>/dev/null; then
+    DEST_DIR="/tmp/screenshots"
+else
+    rm -f "/sdcard/.test_rw" 2>/dev/null
+fi
+mkdir -p "$DEST_DIR" 2>/dev/null
+
+TIMESTAMP=$(date '+%Y%m%d_%H%M%S' 2>/dev/null || echo "$$")
+OUT="${1:-$DEST_DIR/screenshot_$TIMESTAMP.png}"
+
+echo "Capturing recovery screen to $OUT..."
+
+# Try native screencap if present
+if command -v screencap >/dev/null 2>&1; then
+    screencap -p "$OUT" 2>/dev/null
+fi
+
+# Fallback: check if screencap generated a valid file (>1KB)
+if [ ! -s "$OUT" ] || [ "$(wc -c < "$OUT" 2>/dev/null || echo 0)" -lt 1024 ]; then
+    if [ -c "/dev/graphics/fb0" ] || [ -f "/dev/graphics/fb0" ]; then
+        RAW_OUT="${OUT%.*}.raw"
+        dd if=/dev/graphics/fb0 of="$RAW_OUT" bs=1M count=10 2>/dev/null
+        # If we have ffmpeg/convert or png encoder in recovery
+        if command -v ffmpeg >/dev/null 2>&1; then
+            ffmpeg -f rawvideo -pixel_format rgba -video_size 1080x2340 -i "$RAW_OUT" -vframes 1 -y "$OUT" 2>/dev/null
+            rm -f "$RAW_OUT" 2>/dev/null
+        else
+            mv "$RAW_OUT" "$OUT" 2>/dev/null
+        fi
+    fi
+fi
+
+if [ -s "$OUT" ]; then
+    SIZE=$(ls -lh "$OUT" 2>/dev/null | awk '{print $5}')
+    echo "✓ Screenshot saved: $OUT ($SIZE)"
+    exit 0
+else
+    echo "Error: Failed to capture framebuffer." >&2
+    exit 1
+fi

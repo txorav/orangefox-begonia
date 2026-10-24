@@ -1,0 +1,164 @@
+#!/system/bin/sh
+#
+# fastcharge - Begonia Fast Charging & Pump Express Controller
+#
+# Regulates MT6360 PMIC & MediaTek Pump Express charging current in recovery.
+#
+# Usage:
+#   fastcharge on
+#   fastcharge boost
+#   fastcharge off
+#   fastcharge status [--json]
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+BATT_DIR="/sys/class/power_supply/battery"
+CHG_DIR="/sys/class/power_supply/mt6360-charger"
+
+write_node() {
+    local node="$1"
+    local val="$2"
+    if [ -f "$node" ]; then
+        echo "$val" > "$node" 2>/dev/null || true
+    fi
+}
+
+read_node() {
+    local node="$1"
+    local default="$2"
+    if [ -f "$node" ]; then
+        cat "$node" 2>/dev/null || echo "$default"
+    else
+        echo "$default"
+    fi
+}
+
+enable_fast_charge() {
+    local max_current="${1:-2500000}" # 2.5A default fast charge
+    write_node "$BATT_DIR/charging_enabled" 1
+    write_node "$BATT_DIR/input_current_limit" "$max_current"
+    write_node "$BATT_DIR/constant_charge_current_max" "$max_current"
+    write_node "$BATT_DIR/current_max" "$max_current"
+    write_node "$CHG_DIR/input_current_limit" "$max_current"
+    write_node "/sys/devices/platform/battery/Pump_Express" 1
+    write_node "$BATT_DIR/fast_chg_indicator" 1
+}
+
+enable_boost() {
+    # 3.0A - 3.6A Maximum Pump Express 4.0 Boost
+    enable_fast_charge 3500000
+    write_node "$BATT_DIR/fast_chg_indicator" 2
+}
+
+disable_charging() {
+    write_node "$BATT_DIR/charging_enabled" 0
+    write_node "$BATT_DIR/fast_chg_indicator" 0
+}
+
+status() {
+    local cap volt temp current fast_ind status_text
+    cap=$(read_node "$BATT_DIR/capacity" "N/A")
+    volt=$(read_node "$BATT_DIR/voltage_now" "0")
+    if [ "$volt" -gt 1000 ] 2>/dev/null; then
+        volt="$((volt / 1000)) mV"
+    fi
+    temp=$(read_node "$BATT_DIR/temp" "0")
+    if [ "$temp" -gt 0 ] 2>/dev/null; then
+        temp="$((temp / 10))°C"
+    fi
+    current=$(read_node "$BATT_DIR/current_now" "0")
+    if [ "$current" -gt 1000 ] 2>/dev/null; then
+        current="$((current / 1000)) mA"
+    elif [ "$current" -lt -1000 ] 2>/dev/null; then
+        current="$((current / 1000)) mA"
+    fi
+    fast_ind=$(read_node "$BATT_DIR/fast_chg_indicator" "0")
+    status_text=$(read_node "$BATT_DIR/status" "Unknown")
+
+    local mode="Standard"
+    [ "$fast_ind" = "1" ] && mode="Fast Charging (PE3.0/QC)"
+    [ "$fast_ind" = "2" ] && mode="Ultra Boost (PE4.0 18W+)"
+
+    if [ "$1" = "--json" ] || [ "$1" = "-j" ]; then
+        printf '{"status":"ok","capacity":"%s","voltage":"%s","temperature":"%s","current":"%s","charging_status":"%s","mode":"%s"}\n' \
+            "$cap" "$volt" "$temp" "$current" "$status_text" "$mode"
+    else
+        echo "========================================"
+        echo "   Begonia Fast Charge & Power Status   "
+        echo "========================================"
+        echo "Battery Capacity : $cap%"
+        echo "Charging Status  : $status_text"
+        echo "Charge Mode      : $mode"
+        echo "Current Flow     : $current"
+        echo "Voltage          : $volt"
+        echo "Temperature      : $temp"
+        echo "========================================"
+    fi
+}
+
+interactive_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        status
+        echo ""
+        echo "Hardware & Power Actions:"
+        echo "  [1] Enable Standard Fast Charge (2.5A)"
+        echo "  [2] Enable Pump Express Ultra Boost (3.5A PE4.0)"
+        echo "  [3] Disable Battery Charging"
+        echo "  [4] Flashlight: Turn ON"
+        echo "  [5] Flashlight: Turn OFF"
+        echo "  [6] Flashlight: Toggle"
+        echo "  [7] Double Tap to Wake (DT2W): Enable"
+        echo "  [8] Double Tap to Wake (DT2W): Disable"
+        echo "  [9] Capture Screenshot"
+        echo "  [q] Return"
+        echo ""
+        printf "power > "
+        read -r pc || break
+        case "$pc" in
+            1) enable_fast_charge; sleep 1 ;;
+            2) enable_boost; sleep 1 ;;
+            3) disable_charging; sleep 1 ;;
+            4) /system/bin/flashlight on; sleep 1 ;;
+            5) /system/bin/flashlight off; sleep 1 ;;
+            6) /system/bin/flashlight toggle; sleep 1 ;;
+            7) /system/bin/dt2w on; sleep 1 ;;
+            8) /system/bin/dt2w off; sleep 1 ;;
+            9) /system/bin/screenshot; sleep 2 ;;
+            q|quit|exit) break ;;
+        esac
+    done
+}
+
+case "$1" in
+    on|enable|fast)
+        enable_fast_charge
+        echo "Fast charging ENABLED (2.5A target)"
+        ;;
+    boost|max)
+        enable_boost
+        echo "Pump Express Ultra Boost ENABLED (3.5A target)"
+        ;;
+    off|disable)
+        disable_charging
+        echo "Charging DISABLED"
+        ;;
+    status)
+        status "$2"
+        ;;
+    menu|"")
+        interactive_menu
+        ;;
+    *)
+        cat <<EOF
+Usage: fastcharge [on|boost|off|status|menu]
+  on      Enable standard fast charging (up to 2.5A)
+  boost   Enable max Pump Express 4.0 boost (up to 3.5A)
+  off     Disable battery charging
+  status  Display live battery, current, and charging telemetry
+  menu    Launch interactive recovery power manager
+EOF
+        ;;
+esac

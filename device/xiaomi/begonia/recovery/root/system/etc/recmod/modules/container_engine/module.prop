@@ -1,0 +1,6 @@
+id=container_engine
+name=In-RAM Linux Container Engine
+version=1.0.0
+author=Unified
+category=system
+description=Modular In-RAM Linux Container Management Engine with persistent storage

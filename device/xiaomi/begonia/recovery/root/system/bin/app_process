@@ -1,0 +1,20 @@
+#!/system/bin/sh
+#
+# app_process - Recovery compatibility shim for scrcpy and ADB Java tools
+#
+# Intercepts scrcpy invocation in recovery and redirects to recovery mirroring.
+#
+
+echo "Notice: Running in Recovery Mode (Java VM / Zygote not active)." >&2
+
+case "$*" in
+    *scrcpy*)
+        echo "Directing to FoxScrcpy recovery streaming engine..." >&2
+        /system/bin/foxscrcpy guide >&2
+        exit 0
+        ;;
+    *)
+        echo "app_process: Java runtime unavailable in recovery environment." >&2
+        exit 127
+        ;;
+esac

@@ -1,0 +1,104 @@
+#!/system/bin/sh
+#
+# foxaudio - Begonia Recovery Audio Engine & Music Player
+#
+# Routes ALSA audio to Speaker / Headset on MediaTek MT6785 / MT6359 audio codec.
+#
+# Usage:
+#   foxaudio play <file.wav>
+#   foxaudio stop
+#   foxaudio volume <0-100>
+#   foxaudio test
+#   foxaudio status
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+PID_FILE="/tmp/foxaudio.pid"
+
+init_alsa_begonia() {
+    if command -v tinymix >/dev/null 2>&1; then
+        # Unmute & route to Begonia main speaker
+        tinymix "Audio_Speaker_ClassD_DL_Volume" 1 2>/dev/null || true
+        tinymix "Speaker_Volume" 15 2>/dev/null || true
+        tinymix "Audio_PGA1_Setting" 3 2>/dev/null || true
+        tinymix "Audio_PGA2_Setting" 3 2>/dev/null || true
+        tinymix "Ext_Speaker_Amp" 1 2>/dev/null || true
+    fi
+}
+
+play_audio() {
+    local file="$1"
+    [ -z "$file" ] || [ ! -f "$file" ] && { echo "Error: audio file (.wav) required"; return 1; }
+
+    init_alsa_begonia
+
+    echo "Playing '$file'..."
+    if command -v tinyplay >/dev/null 2>&1; then
+        tinyplay "$file" &
+        echo "$!" > "$PID_FILE"
+    else
+        # Direct raw stream to ALSA PCM device
+        cat "$file" > /dev/snd/pcmC0D0p 2>/dev/null &
+        echo "$!" > "$PID_FILE"
+    fi
+    echo "✓ Audio playback started in background."
+}
+
+stop_audio() {
+    if [ -f "$PID_FILE" ]; then
+        kill -9 "$(cat "$PID_FILE")" 2>/dev/null || true
+        rm -f "$PID_FILE"
+    fi
+    pkill tinyplay 2>/dev/null || true
+    echo "Audio playback stopped."
+}
+
+set_volume() {
+    local pct="$1"
+    [ -z "$pct" ] && pct=80
+    local step=$((pct * 15 / 100))
+    if command -v tinymix >/dev/null 2>&1; then
+        tinymix "Speaker_Volume" "$step" 2>/dev/null || true
+        echo "Volume set to $pct% (level: $step/15)"
+    else
+        echo "Volume set to $pct%"
+    fi
+}
+
+play_test_tone() {
+    local test_wav="/tmp/tone.wav"
+    # Generate 1-second diagnostic sine wave header in /tmp if not present
+    if [ ! -f "$test_wav" ]; then
+        # Create minimal 44.1kHz 16-bit PCM WAV header (44 bytes)
+        printf '\x52\x49\x46\x46\x24\x08\x00\x00\x57\x41\x56\x45\x66\x6d\x74\x20\x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00\x64\x61\x74\x61\x00\x08\x00\x00' > "$test_wav"
+        # Generate 2000 bytes of beep tone
+        awk 'BEGIN { for(i=0;i<2000;i++) printf("%c", (sin(i*0.2)*120)+128) }' /dev/null >> "$test_wav" 2>/dev/null
+    fi
+    play_audio "$test_wav"
+}
+
+case "$1" in
+    play) shift; play_audio "$@" ;;
+    stop) stop_audio ;;
+    vol|volume) shift; set_volume "$@" ;;
+    test) play_test_tone ;;
+    status)
+        if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+            echo "Audio Engine: PLAYING"
+        else
+            echo "Audio Engine: IDLE"
+        fi
+        ;;
+    *)
+        cat <<EOF
+Usage: foxaudio [play|stop|volume|test|status]
+  play <file.wav>   Play audio file via ALSA
+  stop              Stop active audio playback
+  volume <0-100>    Set speaker volume percentage
+  test              Play diagnostic audio tone
+  status            Show audio engine status
+EOF
+        ;;
+esac

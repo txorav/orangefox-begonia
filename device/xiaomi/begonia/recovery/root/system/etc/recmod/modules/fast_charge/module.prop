@@ -1,0 +1,6 @@
+id=fast_charge
+name=MediaTek Pump Express Fast Charge
+version=1.0.0
+author=Unified
+category=power
+description=MT6360 PMIC Pump Express 4.0/3.0 fast charging driver for Begonia

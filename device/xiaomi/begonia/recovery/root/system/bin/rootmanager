@@ -94,7 +94,9 @@ detect_root_managers() {
     fi
 
     # APatch / FolkPatch
-    if [ -d "$ADB_DIR/ap" ] || [ -f "$ADB_DIR/apd" ]; then
+    if [ -d "$ADB_DIR/ap" ] || [ -f "$ADB_DIR/apd" ] || [ -d "$ADB_DIR/apatch" ] || \
+       [ -f "$ADB_DIR/ap/bin/apd" ] || [ -f "$ADB_DIR/ap/superkey" ] || \
+       [ -f "$DATA_DIR/adb/apd" ] || [ -d "$DATA_DIR/adb/ap" ] || [ -d "$DATA_DIR/adb/apatch" ]; then
         if [ -f "$ADB_DIR/ap/folkpatch" ] || [ -d "$ADB_DIR/folkpatch" ] || grep -qi "folk" "$ADB_DIR/ap/"* 2>/dev/null; then
             echo "folkpatch"
         else
@@ -121,6 +123,33 @@ detect_root_managers() {
         found=1
     fi
 
+    # Boot Partition Scanning (Detects kernel-level root even if /data is unmounted or encrypted)
+    for boot_dev in /dev/block/by-name/boot /dev/block/platform/bootdevice/by-name/boot /dev/block/bootdevice/by-name/boot; do
+        if [ -b "$boot_dev" ]; then
+            local boot_head
+            boot_head=$(dd if="$boot_dev" bs=1M count=12 2>/dev/null | strings 2>/dev/null)
+            if echo "$boot_head" | grep -q "APatch\|kpimg"; then
+                case " $(detect_root_managers 2>/dev/null) " in
+                    *" apatch "*|*" folkpatch "*) ;;
+                    *) echo "apatch (kernel)"; found=1 ;;
+                esac
+            fi
+            if echo "$boot_head" | grep -q "KernelSU"; then
+                case " $(detect_root_managers 2>/dev/null) " in
+                    *" kernelsu "*|*" ksun "*|*" mksu "*) ;;
+                    *) echo "kernelsu (kernel)"; found=1 ;;
+                esac
+            fi
+            if echo "$boot_head" | grep -q "MAGISK"; then
+                case " $(detect_root_managers 2>/dev/null) " in
+                    *" magisk "*|*" kitsune_mask "*|*" magisk_alpha "*) ;;
+                    *) echo "magisk (boot ramdisk)"; found=1 ;;
+                esac
+            fi
+            break
+        fi
+    done
+
     if [ "$found" -eq 0 ]; then
         echo "none"
     fi
@@ -135,6 +164,7 @@ get_module_dirs() {
     [ -d "$ADB_DIR/ksun/modules" ] && dirs="$dirs $ADB_DIR/ksun/modules"
     [ -d "$ADB_DIR/mksu/modules" ] && dirs="$dirs $ADB_DIR/mksu/modules"
     [ -d "$ADB_DIR/ap/modules" ] && dirs="$dirs $ADB_DIR/ap/modules"
+    [ -d "$ADB_DIR/apatch/modules" ] && dirs="$dirs $ADB_DIR/apatch/modules"
     [ -d "$ADB_DIR/sukisu/modules" ] && dirs="$dirs $ADB_DIR/sukisu/modules"
     [ -d "$ADB_DIR/modules_update" ] && dirs="$dirs $ADB_DIR/modules_update"
     echo "$dirs"

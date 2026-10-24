@@ -18,6 +18,8 @@ RECMOD_LOG="$RECMOD_RUN_DIR/recmod.log"
 SEARCH_DIRS="
 /tmp/recovery/modules
 /system/etc/recmod/modules
+/data/recovery/modules
+/data/recovery/recmod/modules
 /sdcard/recovery/modules
 /external_sd/recovery/modules
 /usbstorage/recovery/modules
@@ -337,6 +339,64 @@ interactive_menu() {
     done
 }
 
+# In-RAM ZRAM swap management
+zram_control() {
+    local cmd="$1"
+    local size_mb="${2:-1024}"
+    local zdev="/dev/block/zram0"
+    local sys_zram="/sys/block/zram0"
+
+    case "$cmd" in
+        on|start|enable)
+            if [ -f "$sys_zram/disksize" ]; then
+                local cur_size
+                cur_size=$(cat "$sys_zram/disksize" 2>/dev/null || echo 0)
+                if [ "$cur_size" -gt 0 ]; then
+                    echo -e "${YELLOW}ZRAM swap is already active ($((cur_size / 1024 / 1024)) MB).${RESET}"
+                    return 0
+                fi
+                echo -e "${BOLD}Initializing in-RAM ZRAM swap (${size_mb} MB)...${RESET}"
+                echo 1 > "$sys_zram/reset" 2>/dev/null || true
+                echo "$((size_mb * 1024 * 1024))" > "$sys_zram/disksize" 2>/dev/null
+                if [ -b "$zdev" ]; then
+                    mkswap "$zdev" >/dev/null 2>&1
+                    swapon "$zdev" >/dev/null 2>&1
+                    echo -e "${GREEN}${BOLD}✓ ZRAM ${size_mb}MB swap active in RAM.${RESET}"
+                fi
+            else
+                echo -e "${RED}Kernel does not expose /sys/block/zram0.${RESET}"
+            fi
+            ;;
+        off|stop|disable)
+            echo -e "${BOLD}Disabling ZRAM swap...${RESET}"
+            swapoff "$zdev" 2>/dev/null || true
+            echo 1 > "$sys_zram/reset" 2>/dev/null || true
+            echo -e "${GREEN}✓ ZRAM swap disabled and memory returned.${RESET}"
+            ;;
+        status|"")
+            if [ -f "$sys_zram/disksize" ]; then
+                local sz orig comp
+                sz=$(cat "$sys_zram/disksize" 2>/dev/null || echo 0)
+                orig=$(cat "$sys_zram/orig_data_size" 2>/dev/null || echo 0)
+                comp=$(cat "$sys_zram/compr_data_size" 2>/dev/null || echo 0)
+                echo "ZRAM Total Disksize  : $((sz / 1024 / 1024)) MB"
+                echo "Original Data Stored : $((orig / 1024 / 1024)) MB"
+                echo "Compressed in RAM    : $((comp / 1024 / 1024)) MB"
+            else
+                echo "ZRAM not supported on this kernel."
+            fi
+            ;;
+    esac
+}
+
+# Free RAM caches
+clean_memory() {
+    echo -e "${BOLD}Flushing filesystem pagecache and reclaimable slab objects...${RESET}"
+    sync
+    echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+    echo -e "${GREEN}✓ Memory caches dropped.${RESET}"
+}
+
 case "$1" in
     list|ls)
         list_modules
@@ -356,6 +416,13 @@ case "$1" in
         shift
         status_module "$@"
         ;;
+    zram)
+        shift
+        zram_control "$@"
+        ;;
+    clean|drop_caches)
+        clean_memory
+        ;;
     menu|interactive|"")
         interactive_menu
         ;;
@@ -369,6 +436,8 @@ Commands:
   load <id>         Dynamically load module & drivers into RAM
   unload <id>       Unload module and free RAM
   status [id]       Display live hardware telemetry and active state
+  zram [on|off|st]  Manage 1GB in-RAM ZRAM swap
+  clean             Reclaim RAM caches (drop_caches)
   menu              Launch interactive recovery terminal menu
 EOF
         ;;

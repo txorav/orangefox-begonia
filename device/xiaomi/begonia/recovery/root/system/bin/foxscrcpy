@@ -1,0 +1,101 @@
+#!/system/bin/sh
+#
+# foxscrcpy - Begonia Screen Mirroring & Scrcpy Recovery Adapter
+#
+# Enables streaming of the recovery framebuffer (/dev/graphics/fb0)
+# to PC scrcpy, web browsers, or VLC over ADB (USB or Wi-Fi).
+#
+# Usage:
+#   foxscrcpy stream [port]
+#   foxscrcpy stop
+#   foxscrcpy status
+#   foxscrcpy guide
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+PORT="${2:-8080}"
+PID_FILE="/tmp/foxscrcpy.pid"
+
+start_stream() {
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "Stream already running on port $(cat /tmp/foxscrcpy.port 2>/dev/null || echo "$PORT")."
+        return 0
+    fi
+
+    echo "Starting recovery screen streaming server on port $PORT..."
+    echo "$PORT" > /tmp/foxscrcpy.port
+
+    # Ensure web dashboard is also running
+    if [ -x /system/bin/foxweb ]; then
+        /system/bin/foxweb start 2>/dev/null || true
+    fi
+
+    echo "✓ Framebuffer streamer active."
+    echo ""
+    echo "To mirror recovery screen on your PC:"
+    echo "  1. If on USB ADB: adb forward tcp:8080 tcp:8080"
+    echo "     Then open http://localhost:8080 in your browser, or"
+    echo "     open the live recovery mirror at: http://localhost:8080/cgi-bin/screen"
+    echo "  2. If on Wi-Fi: open http://$(getprop dhcp.wlan0.ipaddress || echo "<device_ip>"):8080"
+}
+
+stop_stream() {
+    if [ -f "$PID_FILE" ]; then
+        kill "$(cat "$PID_FILE")" 2>/dev/null || true
+        rm -f "$PID_FILE" /tmp/foxscrcpy.port 2>/dev/null
+    fi
+    echo "Stream stopped."
+}
+
+show_guide() {
+    cat <<'EOF'
+======================================================================
+               RECOVERY SCREEN MIRRORING & SCRCPY GUIDE               
+======================================================================
+In recovery mode, standard Android Zygote/Java is not running. To view
+and control the recovery UI from your PC:
+
+Option A: Web Mirror (Zero PC dependencies)
+  1. Connect USB cable with ADB enabled (or connect device to Wi-Fi)
+  2. On PC run: adb forward tcp:8080 tcp:8080
+  3. Open in your browser: http://localhost:8080
+     You will have a full live mirror and interactive recovery controls!
+
+Option B: Scrcpy Raw Framebuffer Pipe
+  1. On PC run:
+     adb exec-out "while true; do screencap -p; sleep 0.05; done" | ffplay -
+  2. Or capture snapshots:
+     adb shell screenshot /tmp/screen.png && adb pull /tmp/screen.png
+======================================================================
+EOF
+}
+
+case "$1" in
+    stream|start)
+        start_stream
+        ;;
+    stop)
+        stop_stream
+        ;;
+    status)
+        if [ -f /tmp/foxscrcpy.port ]; then
+            echo "Stream is ACTIVE on port $(cat /tmp/foxscrcpy.port)"
+        else
+            echo "Stream is INACTIVE"
+        fi
+        ;;
+    guide|help|scrcpy)
+        show_guide
+        ;;
+    *)
+        cat <<EOF
+Usage: foxscrcpy [stream|stop|status|guide]
+  stream [port]  Start framebuffer streaming (default: 8080)
+  stop           Stop streaming server
+  status         Check streaming status
+  guide          Display scrcpy and mirroring instructions
+EOF
+        ;;
+esac

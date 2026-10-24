@@ -1,0 +1,181 @@
+#!/system/bin/sh
+#
+# flashlight / torch - Begonia Flashlight Controller
+#
+# Controls LED torch on Redmi Note 8 Pro (MT6785 / MT6360 PMIC)
+# Auto-detects active sysfs nodes and brightness limits.
+#
+# Usage:
+#   flashlight on [brightness]
+#   flashlight off
+#   flashlight toggle
+#   flashlight status [--json]
+#   flashlight <brightness_value>
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# Candidate sysfs nodes on Begonia (ordered by priority)
+CANDIDATE_NODES="
+/sys/class/leds/torch-light0/brightness
+/sys/class/leds/torch-light1/brightness
+/sys/class/leds/flashlight/brightness
+/sys/class/leds/led:torch_0/brightness
+/sys/devices/platform/11007000.i2c/i2c-1/1-0034/leds/torch-light0/brightness
+/sys/devices/platform/mt6360_pmu_led/leds/torch-light0/brightness
+"
+
+find_torch_node() {
+    for node in $CANDIDATE_NODES; do
+        if [ -f "$node" ]; then
+            echo "$node"
+            return 0
+        fi
+    done
+    # Fallback to the primary known Begonia node
+    echo "/sys/class/leds/torch-light0/brightness"
+}
+
+NODE=$(find_torch_node)
+DIR=$(dirname "$NODE")
+
+# Determine max brightness
+MAX_BRIGHTNESS=2047
+if [ -f "$DIR/max_brightness" ]; then
+    VAL=$(cat "$DIR/max_brightness" 2>/dev/null)
+    [ -n "$VAL" ] && [ "$VAL" -gt 0 ] && MAX_BRIGHTNESS="$VAL"
+fi
+
+get_current() {
+    if [ -f "$NODE" ]; then
+        cat "$NODE" 2>/dev/null || echo 0
+    else
+        echo 0
+    fi
+}
+
+set_brightness() {
+    local val="$1"
+    if [ -z "$val" ]; then
+        echo "Error: brightness value required" >&2
+        return 1
+    fi
+    # Clamp to max
+    if [ "$val" -gt "$MAX_BRIGHTNESS" ]; then
+        val="$MAX_BRIGHTNESS"
+    fi
+    if [ "$val" -lt 0 ]; then
+        val=0
+    fi
+
+    # Attempt write
+    if [ -w "$NODE" ] || [ -f "$NODE" ]; then
+        echo "$val" > "$NODE" 2>/dev/null
+    fi
+
+    # Also mirror to secondary torch if present
+    for sec in /sys/class/leds/torch-light1/brightness /sys/class/leds/flashlight/brightness; do
+        if [ -f "$sec" ] && [ "$sec" != "$NODE" ]; then
+            echo "$val" > "$sec" 2>/dev/null || true
+        fi
+    done
+}
+
+status() {
+    local cur
+    cur=$(get_current)
+    local state="off"
+    [ "$cur" -gt 0 ] && state="on"
+
+    if [ "$1" = "--json" ] || [ "$1" = "-j" ]; then
+        printf '{"status":"ok","node":"%s","state":"%s","brightness":%d,"max_brightness":%d}\n' \
+            "$NODE" "$state" "$cur" "$MAX_BRIGHTNESS"
+    else
+        echo "Flashlight State : $state"
+        echo "Current Level    : $cur"
+        echo "Max Brightness   : $MAX_BRIGHTNESS"
+        echo "Control Node     : $NODE"
+    fi
+}
+
+interactive_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        status
+        echo ""
+        echo "Flashlight Actions:"
+        echo "  [1] Turn ON (Max Brightness: $MAX_BRIGHTNESS)"
+        echo "  [2] Turn OFF"
+        echo "  [3] Toggle ON/OFF"
+        echo "  [4] Low Brightness (100)"
+        echo "  [5] Medium Brightness (500)"
+        echo "  [6] High Brightness (1000)"
+        echo "  [7] Custom Brightness Level"
+        echo "  [q] Return"
+        echo ""
+        printf "torch > "
+        read -r tc || break
+        case "$tc" in
+            1) set_brightness "$MAX_BRIGHTNESS"; sleep 1 ;;
+            2) set_brightness 0; sleep 1 ;;
+            3)
+                cur=$(get_current)
+                [ "$cur" -gt 0 ] && set_brightness 0 || set_brightness "$MAX_BRIGHTNESS"
+                sleep 1
+                ;;
+            4) set_brightness 100; sleep 1 ;;
+            5) set_brightness 500; sleep 1 ;;
+            6) set_brightness 1000; sleep 1 ;;
+            7)
+                printf "Enter brightness (0 - $MAX_BRIGHTNESS): "; read -r cb
+                set_brightness "$cb"
+                sleep 1
+                ;;
+            q|quit|exit) break ;;
+        esac
+    done
+}
+
+case "$1" in
+    on)
+        level="${2:-$MAX_BRIGHTNESS}"
+        set_brightness "$level"
+        echo "Flashlight turned ON (level: $level)"
+        ;;
+    off)
+        set_brightness 0
+        echo "Flashlight turned OFF"
+        ;;
+    toggle)
+        cur=$(get_current)
+        if [ "$cur" -gt 0 ]; then
+            set_brightness 0
+            echo "Flashlight toggled OFF"
+        else
+            set_brightness "$MAX_BRIGHTNESS"
+            echo "Flashlight toggled ON (level: $MAX_BRIGHTNESS)"
+        fi
+        ;;
+    status)
+        status "$2"
+        ;;
+    [0-9]*)
+        set_brightness "$1"
+        echo "Flashlight brightness set to $1"
+        ;;
+    menu|"")
+        interactive_menu
+        ;;
+    *)
+        cat <<EOF
+Usage: flashlight [on|off|toggle|status|menu|<level>]
+  on [level]     Turn flashlight on (default: $MAX_BRIGHTNESS)
+  off            Turn flashlight off
+  toggle         Toggle flashlight on/off
+  status [--json]Show flashlight status
+  menu           Interactive torch control menu
+  <level>        Set custom brightness (0 - $MAX_BRIGHTNESS)
+EOF
+        ;;
+esac

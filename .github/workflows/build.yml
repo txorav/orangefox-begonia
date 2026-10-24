@@ -217,16 +217,26 @@ jobs:
             exit 1
           fi
           export TARGET_PRODUCT TARGET_BUILD_VARIANT TARGET_BUILD_TYPE
-          mka -j"$BUILD_JOBS" libssl $BUILD_TARGET 2>&1 | tee -a build.log
+          mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
 
           # Ensure libssl.so is bundled into recovery ramdisk for wpa_supplicant
           REC_ROOT="out/target/product/begonia/recovery/root/system/lib64"
           SYS_LIB="out/target/product/begonia/system/lib64"
-          if [ -f "$SYS_LIB/libssl.so" ] && [ ! -f "$REC_ROOT/libssl.so" ]; then
-            echo "Relinking libssl.so into recovery ramdisk..."
-            mkdir -p "$REC_ROOT"
-            cp -fp "$SYS_LIB/libssl.so" "$REC_ROOT/"
-            mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
+          if [ ! -f "$REC_ROOT/libssl.so" ]; then
+            SSL_FOUND=""
+            if [ -f "$SYS_LIB/libssl.so" ]; then
+              SSL_FOUND="$SYS_LIB/libssl.so"
+            else
+              SSL_FOUND=$(find out/target/product/begonia -name "libssl.so" ! -path "*/recovery/*" 2>/dev/null | head -n 1 || true)
+            fi
+            if [ -n "$SSL_FOUND" ] && [ -f "$SSL_FOUND" ]; then
+              echo "Relinking libssl.so ($SSL_FOUND) into recovery ramdisk..."
+              mkdir -p "$REC_ROOT"
+              cp -fp "$SSL_FOUND" "$REC_ROOT/libssl.so"
+              mka -j"$BUILD_JOBS" $BUILD_TARGET 2>&1 | tee -a build.log
+            else
+              echo "Warning: libssl.so not found in target output; checking recovery linkage"
+            fi
           fi
 
       - name: Show ccache stats

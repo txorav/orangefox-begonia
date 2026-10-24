@@ -1,0 +1,357 @@
+#!/system/bin/sh
+#
+# appmanager - Begonia Comprehensive Application & Data Manager
+#
+# Full backup, restore, freeze, unfreeze, and lifecycle management of Android apps in recovery.
+#
+# Usage:
+#   appmanager list [--json]
+#   appmanager backup <package_name> [destination_dir]
+#   appmanager restore <archive.tar.gz>
+#   appmanager freeze <package_name>
+#   appmanager unfreeze <package_name>
+#   appmanager clear <package_name>
+#   appmanager uninstall <package_name>
+#   appmanager menu
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+DATA_DIR="/data"
+APP_DIR="/data/app"
+USER_DATA_DIR="/data/data"
+PACKAGES_XML="/data/system/packages.xml"
+
+# Colors
+BOLD="\033[1m"
+GREEN="\033[32m"
+RED="\033[31m"
+YELLOW="\033[33m"
+CYAN="\033[36m"
+RESET="\033[0m"
+
+ensure_data_mounted() {
+    if [ ! -d "$APP_DIR" ]; then
+        if mountpoint -q /data 2>/dev/null; then
+            return 0
+        fi
+        mount /data 2>/dev/null || true
+    fi
+}
+
+get_uid_for_package() {
+    local pkg="$1"
+    if [ -f "$PACKAGES_XML" ]; then
+        grep -E "name=\"$pkg\"" "$PACKAGES_XML" 2>/dev/null | sed -n 's/.*userId="\([0-9]*\)".*/\1/p' | head -n 1
+    fi
+}
+
+find_apk_path() {
+    local pkg="$1"
+    for d in "$APP_DIR"/"$pkg"* "$APP_DIR"/*/"$pkg"*; do
+        if [ -d "$d" ]; then
+            for f in "$d"/*.apk; do
+                if [ -f "$f" ]; then
+                    echo "$f"
+                    return 0
+                fi
+            done
+        elif [ -f "$d" ] && case "$d" in *.apk) true ;; *) false ;; esac; then
+            echo "$d"
+            return 0
+        fi
+    done
+    return 1
+}
+
+list_apps() {
+    ensure_data_mounted
+    if [ ! -d "$APP_DIR" ] && [ ! -d "$USER_DATA_DIR" ]; then
+        echo "Error: /data is unmounted or encrypted. Cannot access apps." >&2
+        return 1
+    fi
+
+    local json=0
+    [ "$1" = "--json" ] || [ "$1" = "-j" ] && json=1
+
+    [ "$json" -eq 1 ] && printf '{"status":"ok","apps":['
+
+    local first=1
+    local count=0
+
+    # Scan packages from directories under /data/data and /data/app
+    local pkgs=""
+    for d in "$USER_DATA_DIR"/*; do
+        [ -d "$d" ] || continue
+        local p
+        p=$(basename "$d")
+        case "$p" in
+            .*|lost+found) continue ;;
+        esac
+        pkgs="$pkgs $p"
+    done
+
+    for pkg in $pkgs; do
+        local apk_file
+        apk_file=$(find_apk_path "$pkg")
+        local uid
+        uid=$(get_uid_for_package "$pkg")
+        [ -z "$uid" ] && uid=$(stat -c '%u' "$USER_DATA_DIR/$pkg" 2>/dev/null || echo "10000")
+
+        local state="active"
+        if [ -n "$apk_file" ]; then
+            case "$apk_file" in
+                *.frozen) state="frozen" ;;
+            esac
+        fi
+
+        count=$((count + 1))
+
+        if [ "$json" -eq 1 ]; then
+            [ "$first" -eq 0 ] && printf ','
+            first=0
+            printf '{"package":"%s","apk":"%s","uid":%s,"state":"%s"}' \
+                "$pkg" "${apk_file:-none}" "${uid:-10000}" "$state"
+        else
+            echo -e "${BOLD}[$count] ${CYAN}${pkg}${RESET} (UID: ${uid})"
+            echo -e "    APK   : ${apk_file:-Not in /data/app (System app)}"
+            echo -e "    State : ${state}"
+            echo -e "    Data  : $USER_DATA_DIR/$pkg"
+            echo "------------------------------------------------------------------"
+        fi
+    done
+
+    if [ "$json" -eq 1 ]; then
+        printf '],"total":%d}\n' "$count"
+    else
+        [ "$count" -eq 0 ] && echo "No user packages discovered."
+    fi
+}
+
+backup_app() {
+    local pkg="$1"
+    local dest="$2"
+
+    [ -z "$pkg" ] && { echo "Error: Package name required. Usage: appmanager backup <pkg>"; return 1; }
+
+    ensure_data_mounted
+    if [ ! -d "$USER_DATA_DIR/$pkg" ] && [ -z "$(find_apk_path "$pkg")" ]; then
+        echo -e "${RED}Error: Package '$pkg' not found on device.${RESET}"
+        return 1
+    fi
+
+    # Destination directory
+    if [ -z "$dest" ]; then
+        if [ -d "/sdcard" ] && touch "/sdcard/.rw_test" 2>/dev/null; then
+            rm -f "/sdcard/.rw_test"
+            dest="/sdcard/Backups/apps"
+        else
+            dest="/data/recovery/app_backups"
+        fi
+    fi
+    mkdir -p "$dest" 2>/dev/null
+
+    local timestamp
+    timestamp=$(date '+%Y%m%d_%H%M%S' 2>/dev/null || echo "$$")
+    local archive="$dest/${pkg}_backup_${timestamp}.tar.gz"
+    local temp_work="/tmp/app_backup_$$"
+
+    echo -e "${BOLD}Backing up '$pkg' to $archive...${RESET}"
+    mkdir -p "$temp_work"
+
+    # Save metadata
+    local uid
+    uid=$(get_uid_for_package "$pkg")
+    [ -z "$uid" ] && uid=$(stat -c '%u' "$USER_DATA_DIR/$pkg" 2>/dev/null || echo "10000")
+    cat <<EOF > "$temp_work/metadata.prop"
+package=$pkg
+uid=$uid
+timestamp=$timestamp
+EOF
+
+    # Copy APK if available
+    local apk_file
+    apk_file=$(find_apk_path "$pkg")
+    if [ -n "$apk_file" ] && [ -f "$apk_file" ]; then
+        mkdir -p "$temp_work/apk"
+        cp -p "$apk_file" "$temp_work/apk/base.apk"
+        echo "  ✓ Bundled APK: $(basename "$apk_file")"
+    fi
+
+    # Copy Data
+    if [ -d "$USER_DATA_DIR/$pkg" ]; then
+        mkdir -p "$temp_work/data"
+        cp -a "$USER_DATA_DIR/$pkg" "$temp_work/data/"
+        echo "  ✓ Bundled User Data (/data/data/$pkg)"
+    fi
+
+    # Compress into tarball
+    (cd "$temp_work" && tar -czf "$archive" . 2>/dev/null)
+    rm -rf "$temp_work"
+
+    if [ -s "$archive" ]; then
+        local sz
+        sz=$(ls -lh "$archive" 2>/dev/null | awk '{print $5}')
+        echo -e "${GREEN}${BOLD}✓ Backup created successfully: $archive ($sz)${RESET}"
+        return 0
+    else
+        echo -e "${RED}Error creating backup archive.${RESET}"
+        return 1
+    fi
+}
+
+restore_app() {
+    local archive="$1"
+    [ -z "$archive" ] || [ ! -f "$archive" ] && { echo "Error: Valid backup archive (.tar.gz) required."; return 1; }
+
+    ensure_data_mounted
+    local temp_work="/tmp/app_restore_$$"
+    mkdir -p "$temp_work"
+    tar -xzf "$archive" -C "$temp_work" 2>/dev/null
+
+    local prop="$temp_work/metadata.prop"
+    if [ ! -f "$prop" ]; then
+        echo -e "${RED}Error: Invalid backup archive (missing metadata).${RESET}"
+        rm -rf "$temp_work"
+        return 1
+    fi
+
+    local pkg uid
+    pkg=$(grep "^package=" "$prop" | cut -d= -f2-)
+    uid=$(grep "^uid=" "$prop" | cut -d= -f2-)
+    [ -z "$uid" ] && uid=10000
+
+    echo -e "${BOLD}Restoring application '$pkg' (UID: $uid)...${RESET}"
+
+    # Restore APK
+    if [ -f "$temp_work/apk/base.apk" ]; then
+        local target_apk_dir="$APP_DIR/$pkg"
+        mkdir -p "$target_apk_dir"
+        cp -p "$temp_work/apk/base.apk" "$target_apk_dir/base.apk"
+        chmod 0644 "$target_apk_dir/base.apk"
+        chmod 0755 "$target_apk_dir"
+        chown -R 1000:1000 "$target_apk_dir" 2>/dev/null || true
+        command -v restorecon >/dev/null 2>&1 && restorecon -R "$target_apk_dir" 2>/dev/null || true
+        echo "  ✓ Restored APK to $target_apk_dir/base.apk"
+    fi
+
+    # Restore Data
+    if [ -d "$temp_work/data/$pkg" ]; then
+        mkdir -p "$USER_DATA_DIR"
+        rm -rf "$USER_DATA_DIR/$pkg"
+        cp -a "$temp_work/data/$pkg" "$USER_DATA_DIR/"
+        chown -R "$uid":"$uid" "$USER_DATA_DIR/$pkg" 2>/dev/null || true
+        chmod 0751 "$USER_DATA_DIR/$pkg" 2>/dev/null || true
+        command -v restorecon >/dev/null 2>&1 && restorecon -R "$USER_DATA_DIR/$pkg" 2>/dev/null || true
+        echo "  ✓ Restored Data to $USER_DATA_DIR/$pkg (Ownership $uid:$uid)"
+    fi
+
+    rm -rf "$temp_work"
+    echo -e "${GREEN}${BOLD}✓ Application '$pkg' restored successfully.${RESET}"
+}
+
+freeze_app() {
+    local pkg="$1"
+    [ -z "$pkg" ] && { echo "Error: Package required"; return 1; }
+    ensure_data_mounted
+    local apk
+    apk=$(find_apk_path "$pkg")
+    if [ -n "$apk" ] && [ -f "$apk" ]; then
+        mv "$apk" "${apk}.frozen" 2>/dev/null
+        echo -e "${GREEN}✓ Application '$pkg' FROZEN.${RESET}"
+    else
+        echo -e "${RED}Could not locate APK for '$pkg'.${RESET}"
+    fi
+}
+
+unfreeze_app() {
+    local pkg="$1"
+    [ -z "$pkg" ] && { echo "Error: Package required"; return 1; }
+    ensure_data_mounted
+    for f in "$APP_DIR"/"$pkg"*/*.frozen "$APP_DIR"/*/"$pkg"*/*.frozen; do
+        if [ -f "$f" ]; then
+            mv "$f" "${f%.frozen}" 2>/dev/null
+            echo -e "${GREEN}✓ Application '$pkg' UNFROZEN.${RESET}"
+            return 0
+        fi
+    done
+    echo -e "${YELLOW}No frozen APK found for '$pkg'.${RESET}"
+}
+
+clear_app() {
+    local pkg="$1"
+    [ -z "$pkg" ] && { echo "Error: Package required"; return 1; }
+    ensure_data_mounted
+    if [ -d "$USER_DATA_DIR/$pkg" ]; then
+        rm -rf "$USER_DATA_DIR/$pkg"/* 2>/dev/null
+        echo -e "${GREEN}✓ Data cleared for '$pkg'.${RESET}"
+    else
+        echo -e "${RED}Package '$pkg' data directory not found.${RESET}"
+    fi
+}
+
+uninstall_app() {
+    local pkg="$1"
+    [ -z "$pkg" ] && { echo "Error: Package required"; return 1; }
+    ensure_data_mounted
+    for d in "$APP_DIR"/"$pkg"* "$APP_DIR"/*/"$pkg"*; do
+        [ -d "$d" ] && rm -rf "$d" 2>/dev/null
+    done
+    rm -rf "$USER_DATA_DIR/$pkg" 2>/dev/null
+    echo -e "${GREEN}✓ Uninstalled '$pkg'.${RESET}"
+}
+
+interactive_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        echo -e "${BOLD}======================================================================${RESET}"
+        echo -e "${CYAN}${BOLD}              BEGONIA RECOVERY APP & DATA MANAGER                     ${RESET}"
+        echo -e "${BOLD}======================================================================${RESET}"
+        echo "  [1] List installed applications"
+        echo "  [2] Backup application & data"
+        echo "  [3] Restore application from backup"
+        echo "  [4] Freeze application"
+        echo "  [5] Unfreeze application"
+        echo "  [6] Clear application cache & data"
+        echo "  [7] Uninstall application"
+        echo "  [q] Quit"
+        echo ""
+        printf "Select an option > "
+        read -r opt || break
+        case "$opt" in
+            1) list_apps; read -r -p "Press Enter to continue..." _ ;;
+            2) printf "Enter package name: "; read -r p; backup_app "$p"; read -r -p "Press Enter to continue..." _ ;;
+            3) printf "Enter path to .tar.gz: "; read -r a; restore_app "$a"; read -r -p "Press Enter to continue..." _ ;;
+            4) printf "Enter package name: "; read -r p; freeze_app "$p"; sleep 1 ;;
+            5) printf "Enter package name: "; read -r p; unfreeze_app "$p"; sleep 1 ;;
+            6) printf "Enter package name: "; read -r p; clear_app "$p"; sleep 1 ;;
+            7) printf "Enter package name: "; read -r p; uninstall_app "$p"; sleep 1 ;;
+            q|quit) break ;;
+        esac
+    done
+}
+
+case "$1" in
+    list|ls) shift; list_apps "$@" ;;
+    backup) shift; backup_app "$@" ;;
+    restore) shift; restore_app "$@" ;;
+    freeze) shift; freeze_app "$@" ;;
+    unfreeze) shift; unfreeze_app "$@" ;;
+    clear) shift; clear_app "$@" ;;
+    uninstall|remove) shift; uninstall_app "$@" ;;
+    menu|"") interactive_menu ;;
+    *)
+        cat <<EOF
+Usage: appmanager <command> [args]
+  list [--json]              List installed applications and states
+  backup <pkg> [dest_dir]    Backup APK + /data/data/<pkg> to .tar.gz
+  restore <archive.tar.gz>   Restore APK + app data with ownership
+  freeze <pkg>               Disable app from launching
+  unfreeze <pkg>             Re-enable frozen app
+  clear <pkg>                Wipe app data and cache
+  uninstall <pkg>            Remove app APK and data
+  menu                       Launch interactive terminal UI
+EOF
+        ;;
+esac
