@@ -82,6 +82,12 @@ main_loop() {
         echo -e "${CYAN}${BOLD}  [8] In-RAM Linux OS & ZRAM Manager${RESET}"
         echo -e "      1GB ZRAM compressed swap, pagecache drop, recmod modules"
         echo ""
+        echo -e "${GREEN}${BOLD}  [i] Native IMEI Fixer & NVRAM Manager (Fox Addon)${RESET}"
+        echo -e "      On-screen keypad, auto-fetch from NVRAM, config.txt JSON editor"
+        echo ""
+        echo -e "${GREEN}${BOLD}  [d] PoX Diagnostic Logs Dumper (Fox Addon)${RESET}"
+        echo -e "      Select logs to dump (pstore, dmesg, recovery, dropboxes, tombstone)"
+        echo ""
         echo -e "${CYAN}${BOLD}  [9] Framebuffer Streaming (Scrcpy / Mirror)${RESET}"
         echo -e "      Stream recovery framebuffer over USB/Wi-Fi to PC"
         echo ""
@@ -91,7 +97,7 @@ main_loop() {
         echo -e "${RED}${BOLD}  [q] Exit to Recovery Terminal Shell${RESET}"
         echo ""
         echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"
-        printf "${BOLD}Select Menu Option [0-9, q]: ${RESET}"
+        printf "${BOLD}Select Menu Option [0-9, i, d, q]: ${RESET}"
         read -r choice || break
         case "$choice" in
             1)
@@ -137,6 +143,12 @@ main_loop() {
                 ;;
             8)
                 /system/bin/recmod menu
+                ;;
+            i|I|imei)
+                /system/bin/foximei menu
+                ;;
+            d|D|dump)
+                /system/bin/foxdump menu
                 ;;
             9)
                 /system/bin/foxscrcpy guide

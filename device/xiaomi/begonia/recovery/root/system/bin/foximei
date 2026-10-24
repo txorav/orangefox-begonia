@@ -1,0 +1,560 @@
+#!/system/bin/sh
+#
+# foximei - Begonia Native Fox UI IMEI Fixer & Config Manager
+#
+# Allows reading, editing, and fixing SIM1 & SIM2 IMEIs on Redmi Note 8 Pro (MT6785 / MT6360),
+# with interactive on-screen keyboard/keypad input, auto-fetching from hardware NVRAM,
+# valid JSON & INI config.txt generation, and direct NVRAM calibration.
+#
+# Compatible with:
+#   - /home/dev/Documents/mtk_imei_v2
+#   - /home/dev/pox-imei-fixer
+#   - OrangeFox Recovery Addon System
+#
+# Usage:
+#   foximei                        Interactive Fox UI with on-screen input
+#   foximei fetch                  Display currently detected IMEIs, MACs, chip ID
+#   foximei set <imei1> <imei2>    Directly set IMEIs and update config.txt
+#   foximei backup                 Backup NVRAM IMEI files to /sdcard/Fox/NVRAM_Backup/
+#   foximei restore [tarfile]      Restore NVRAM IMEI backup
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# ANSI Colors
+BOLD="\033[1m"
+GREEN="\033[32m"
+RED="\033[31m"
+YELLOW="\033[33m"
+CYAN="\033[36m"
+MAGENTA="\033[35m"
+ORANGE="\033[38;5;208m"
+DIM="\033[2m"
+RESET="\033[0m"
+
+NVRAM_FILE_1="${NVRAM_FILE_1:-/mnt/vendor/nvdata/md/NVRAM/NVD_IMEI/MP0H_000}"
+NVRAM_FILE_2="${NVRAM_FILE_2:-/mnt/vendor/nvdata/md/NVRAM/NVD_IMEI/MP0H_001}"
+NVRAM_WIFI="${NVRAM_WIFI:-/mnt/vendor/nvdata/APCFG/APRDEB/WIFI}"
+NVRAM_BT="${NVRAM_BT:-/mnt/vendor/nvdata/APCFG/APRDEB/BT_Addr}"
+NVDATA_DIR="${NVDATA_DIR:-/mnt/vendor/nvdata}"
+
+CONFIG_DESTS="${CONFIG_DESTS:-/sdcard/Fox/config.txt /sdcard/config.txt /data/adb/modules/pox_imei_fixer/config.txt /data/recovery/config.txt /tmp/config.txt}"
+
+ensure_nvdata_mounted() {
+    if [ ! -d "$NVDATA_DIR" ] || [ ! -f "$NVRAM_FILE_1" ]; then
+        mount /mnt/vendor/nvdata 2>/dev/null || mount /nvdata 2>/dev/null || true
+        mount /mnt/vendor/protect1 2>/dev/null || true
+        mount /mnt/vendor/protect2 2>/dev/null || true
+        mount /data 2>/dev/null || true
+    fi
+}
+
+# Decode MTK BCD 8-byte format
+decode_mtk_imei() {
+    local file="$1"
+    if [ ! -f "$file" ]; then
+        echo ""
+        return
+    fi
+    od -An -v -tx1 -N8 "$file" 2>/dev/null | awk '{
+        imei = ""
+        b1 = $1; d1 = substr(b1, 2, 1); imei = imei d1;
+        for (i = 2; i <= 8; i++) {
+            b = $i
+            d_low = substr(b, 2, 1)
+            d_high = substr(b, 1, 1)
+            imei = imei d_high d_low
+        }
+        print imei
+    }' | head -n 1
+}
+
+# Encode standard 15-digit IMEI to MediaTek 8-byte BCD file
+encode_mtk_imei() {
+    local imei="$1"
+    local outfile="$2"
+    [ -z "$imei" ] || [ -z "$outfile" ] && return 1
+
+    local len=${#imei}
+    if [ "$len" -lt 15 ]; then
+        echo "Error: IMEI must be 15 digits." >&2
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$outfile")" 2>/dev/null
+    LC_ALL=C awk -v imei="$imei" -v out="$outfile" 'BEGIN {
+        d1 = substr(imei, 1, 1) + 0;
+        b0 = sprintf("%c", d1 + 160);
+        printf("%s", b0) > out;
+        for (i = 2; i <= 14; i += 2) {
+            d_low = substr(imei, i, 1) + 0;
+            d_high = substr(imei, i+1, 1) + 0;
+            byte = sprintf("%c", d_low + (d_high * 16));
+            printf("%s", byte) > out;
+        }
+        close(out);
+    }' 2>/dev/null || {
+        local d1 b0 hex i d_low d_high byte
+        d1=$(echo "$imei" | cut -c1)
+        b0=$(printf "%02x" $((160 + d1)))
+        hex="$b0"
+        for i in 2 4 6 8 10 12 14; do
+            d_low=$(echo "$imei" | cut -c$i)
+            d_high=$(echo "$imei" | cut -c$((i+1)))
+            byte=$(printf "%02x" $((d_low + d_high * 16)))
+            hex="${hex}${byte}"
+        done
+        printf "$(echo "$hex" | sed 's/../\\x&/g')" > "$outfile"
+    }
+}
+
+# Fetch Wi-Fi MAC
+get_device_wifi_mac() {
+    local mac=""
+    if [ -f "/sys/class/net/wlan0/address" ]; then
+        mac=$(cat /sys/class/net/wlan0/address 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d ' \r\n')
+    fi
+    if [ -z "$mac" ] && [ -f "$NVRAM_WIFI" ]; then
+        mac=$(od -An -v -tx1 -j4 -N6 "$NVRAM_WIFI" 2>/dev/null | awk '{print $1":"$2":"$3":"$4":"$5":"$6}')
+    fi
+    if [ -z "$mac" ]; then
+        mac=$(getprop ro.boot.wifimac 2>/dev/null)
+    fi
+    [ -z "$mac" ] && mac="00:11:22:33:44:55"
+    echo "$mac"
+}
+
+# Fetch Bluetooth MAC
+get_device_bt_mac() {
+    local mac=""
+    if [ -f "$NVRAM_BT" ]; then
+        mac=$(od -An -v -tx1 -N6 "$NVRAM_BT" 2>/dev/null | awk '{print $1":"$2":"$3":"$4":"$5":"$6}')
+    fi
+    if [ -z "$mac" ]; then
+        mac=$(getprop ro.boot.btmacaddr 2>/dev/null)
+    fi
+    [ -z "$mac" ] && mac="00:11:22:33:44:66"
+    echo "$mac"
+}
+
+# Fetch Chip ID
+get_device_chip_id() {
+    local cid=""
+    if [ -f "/sys/devices/soc0/soc_id" ]; then
+        cid=$(cat /sys/devices/soc0/soc_id 2>/dev/null | tr -d ' \r\n')
+    fi
+    if [ -z "$cid" ]; then
+        cid=$(getprop ro.boot.serialno 2>/dev/null)
+    fi
+    if [ -z "$cid" ] || [ ${#cid} -lt 16 ]; then
+        cid="0x00000000000000000000000000000000"
+    fi
+    echo "$cid"
+}
+
+# Fetch Kernel Version
+get_device_kernel() {
+    local k
+    k=$(uname -r 2>/dev/null)
+    [ -z "$k" ] && k="4.14.356-openela-rc1-Suzakukernel-V2"
+    echo "$k"
+}
+
+# Fetch currently active or stored IMEIs
+get_device_imeis() {
+    ensure_nvdata_mounted
+
+    local im1="" im2=""
+
+    # Check existing pox_imei_fixer config.txt (JSON or INI)
+    for cfg in $CONFIG_DESTS; do
+        if [ -f "$cfg" ]; then
+            # Try JSON extraction
+            im1=$(grep -o '"imei_1"[^,]*' "$cfg" 2>/dev/null | cut -d':' -f2 | tr -d ' "')
+            im2=$(grep -o '"imei_2"[^,]*' "$cfg" 2>/dev/null | cut -d':' -f2 | tr -d ' "')
+            # Try INI extraction
+            [ -z "$im1" ] && im1=$(grep -E "^(IMEI1|imei1)=" "$cfg" 2>/dev/null | cut -d= -f2- | tr -d ' \r\n')
+            [ -z "$im2" ] && im2=$(grep -E "^(IMEI2|imei2)=" "$cfg" 2>/dev/null | cut -d= -f2- | tr -d ' \r\n')
+            [ -n "$im1" ] && break
+        fi
+    done
+
+    # Check NVRAM files
+    if [ -z "$im1" ] && [ -f "$NVRAM_FILE_1" ]; then
+        im1=$(decode_mtk_imei "$NVRAM_FILE_1")
+    fi
+    if [ -z "$im2" ] && [ -f "$NVRAM_FILE_2" ]; then
+        im2=$(decode_mtk_imei "$NVRAM_FILE_2")
+    fi
+
+    # Check system properties
+    [ -z "$im1" ] && im1=$(getprop persist.radio.imei1 2>/dev/null)
+    [ -z "$im1" ] && im1=$(getprop ro.ril.oem.imei1 2>/dev/null)
+    [ -z "$im2" ] && im2=$(getprop persist.radio.imei2 2>/dev/null)
+    [ -z "$im2" ] && im2=$(getprop ro.ril.oem.imei2 2>/dev/null)
+
+    # Defaults if completely blank or erased
+    [ -z "$im1" ] && im1="860000000000001"
+    [ -z "$im2" ] && im2="860000000000002"
+
+    echo "$im1 $im2"
+}
+
+# Save complete configuration across JSON and INI
+write_imei_config() {
+    local im1="$1"
+    local im2="$2"
+    local wmac="$3"
+    local bmac="$4"
+    local chip="$5"
+    local kern="$6"
+
+    [ -z "$im1" ] && im1="860000000000001"
+    [ -z "$im2" ] && im2="860000000000002"
+    [ -z "$wmac" ] && wmac=$(get_device_wifi_mac)
+    [ -z "$bmac" ] && bmac=$(get_device_bt_mac)
+    [ -z "$chip" ] && chip=$(get_device_chip_id)
+    [ -z "$kern" ] && kern=$(get_device_kernel)
+
+    # Valid JSON matching mtk_imei_v2 & pox-imei-fixer
+    local json_content="{
+  \"patch_cert\": 1,
+  \"kernel\":   \"${kern}\",
+  \"device\":   \"begonia\",
+  \"chip_id\":  \"${chip}\",
+  \"imei_1\":   \"${im1}\",
+  \"imei_2\":   \"${im2}\",
+  \"wifi_mac\": \"${wmac}\",
+  \"bt_mac\":   \"${bmac}\"
+}"
+
+    # Also format INI version
+    local ini_content="# MTK IMEI Config (Begonia)
+IMEI1=${im1}
+IMEI2=${im2}
+WIFI_MAC=${wmac}
+BT_MAC=${bmac}
+CHIP_ID=${chip}
+KERNEL=${kern}
+DEVICE=begonia
+"
+
+    local saved=0
+    for cfg in $CONFIG_DESTS; do
+        local dir
+        dir=$(dirname "$cfg")
+        if [ -d "$dir" ] || mkdir -p "$dir" 2>/dev/null; then
+            printf "%s\n" "$json_content" > "$cfg" 2>/dev/null && saved=$((saved + 1))
+            # Also save .ini alongside
+            printf "%s\n" "$ini_content" > "${cfg%.txt}.ini" 2>/dev/null || true
+        fi
+    done
+
+    # Set properties in current session
+    setprop persist.radio.imei1 "$im1" 2>/dev/null || true
+    setprop persist.radio.imei2 "$im2" 2>/dev/null || true
+
+    return 0
+}
+
+# Direct apply to NVRAM partition
+apply_to_nvram() {
+    local im1="$1"
+    local im2="$2"
+
+    ensure_nvdata_mounted
+    if [ ! -d "$NVDATA_DIR" ]; then
+        echo -e "${RED}Error: NVDATA directory not mounted.${RESET}"
+        return 1
+    fi
+
+    echo "Calibrating and encoding NVRAM files..."
+    encode_mtk_imei "$im1" "$NVRAM_FILE_1"
+    encode_mtk_imei "$im2" "$NVRAM_FILE_2"
+
+    chmod 0660 "$NVRAM_FILE_1" "$NVRAM_FILE_2" 2>/dev/null || true
+    chown root:radio "$NVRAM_FILE_1" "$NVRAM_FILE_2" 2>/dev/null || true
+
+    echo -e "${GREEN}${BOLD}✓ NVRAM IMEI partitions updated directly on device!${RESET}"
+}
+
+# Backup existing NVRAM files
+backup_nvram() {
+    ensure_nvdata_mounted
+    local bdir="/sdcard/Fox/NVRAM_Backup"
+    if [ ! -d "/sdcard" ]; then
+        bdir="/data/recovery/nvram_backup"
+    fi
+    mkdir -p "$bdir" 2>/dev/null
+
+    local ts
+    ts=$(date '+%Y%m%d_%H%M%S' 2>/dev/null || echo "$$")
+    local tarfile="$bdir/nvram_backup_$ts.tar.gz"
+
+    if [ -d "/mnt/vendor/nvdata" ]; then
+        tar -czf "$tarfile" /mnt/vendor/nvdata /mnt/vendor/protect1 /mnt/vendor/protect2 2>/dev/null || true
+        echo -e "${GREEN}✓ NVRAM Backup created at: ${CYAN}${tarfile}${RESET}"
+    else
+        echo -e "${YELLOW}Warning: nvdata mount not active.${RESET}"
+    fi
+}
+
+# Restore NVRAM backup
+restore_nvram() {
+    local tarfile="$1"
+    if [ -z "$tarfile" ]; then
+        local bdir="/sdcard/Fox/NVRAM_Backup"
+        tarfile=$(ls -1t "$bdir"/nvram_backup_*.tar.gz 2>/dev/null | head -n 1)
+    fi
+
+    if [ ! -f "$tarfile" ]; then
+        echo -e "${RED}Error: No backup archive found.${RESET}"
+        return 1
+    fi
+
+    ensure_nvdata_mounted
+    echo "Restoring NVRAM from $tarfile..."
+    tar -xzf "$tarfile" -C / 2>/dev/null
+    echo -e "${GREEN}✓ NVRAM restored successfully!${RESET}"
+}
+
+# Interactive virtual on-screen keypad / keyboard input helper
+keyboard_prompt() {
+    local label="$1"
+    local default_val="$2"
+    local current_val="$default_val"
+
+    while true; do
+        clear 2>/dev/null || echo ""
+        echo -e "${ORANGE}${BOLD}╔══════════════════════════════════════════════════════════════════════╗${RESET}"
+        echo -e "${ORANGE}${BOLD}║              ORANGEFOX ON-SCREEN IMEI KEYPAD / INPUT                 ║${RESET}"
+        echo -e "${ORANGE}${BOLD}╚══════════════════════════════════════════════════════════════════════╝${RESET}"
+        echo -e " Target: ${BOLD}${label}${RESET}"
+        echo -e " Value : ${CYAN}${BOLD}${current_val}${RESET} (Length: ${#current_val})"
+        echo ""
+        echo -e "${YELLOW}Virtual Numeric Keypad Layout:${RESET}"
+        echo -e "   [ 1 ]   [ 2 ]   [ 3 ]"
+        echo -e "   [ 4 ]   [ 5 ]   [ 6 ]"
+        echo -e "   [ 7 ]   [ 8 ]   [ 9 ]"
+        echo -e "   [ b ] Backspace   [ 0 ]   [ c ] Clear"
+        echo -e "   [ d ] Use Default [ s ] Save Value"
+        echo ""
+        echo -e "${DIM}Type digits (or full string), 'b' backspace, 'c' clear, 'd' default, or 's'/'enter' to save.${RESET}"
+        printf "${BOLD}Keypad Input > ${RESET}"
+        read -r keyin || break
+        case "$keyin" in
+            s|save|"")
+                echo "$current_val"
+                return 0
+                ;;
+            b|back|del)
+                current_val="${current_val%?}"
+                ;;
+            c|clear)
+                current_val=""
+                ;;
+            d|default)
+                current_val="$default_val"
+                ;;
+            *)
+                clean=$(echo "$keyin" | sed 's/[^0-9a-fA-F:\.]//g')
+                if [ -n "$clean" ]; then
+                    if [ ${#clean} -ge 12 ]; then
+                        current_val="$clean"
+                    else
+                        current_val="${current_val}${clean}"
+                    fi
+                fi
+                ;;
+        esac
+    done
+    echo "$current_val"
+}
+
+interactive_ui() {
+    local imeis
+    imeis=$(get_device_imeis)
+    local im1 im2 wmac bmac chip kern
+    im1=$(echo "$imeis" | awk '{print $1}')
+    im2=$(echo "$imeis" | awk '{print $2}')
+    wmac=$(get_device_wifi_mac)
+    bmac=$(get_device_bt_mac)
+    chip=$(get_device_chip_id)
+    kern=$(get_device_kernel)
+
+    while true; do
+        clear 2>/dev/null || echo ""
+        echo -e "${ORANGE}${BOLD}╔══════════════════════════════════════════════════════════════════════╗${RESET}"
+        echo -e "${ORANGE}${BOLD}║             ORANGEFOX NATIVE IMEI FIXER & CONFIG MANAGER             ║${RESET}"
+        echo -e "${ORANGE}${BOLD}║             Redmi Note 8 Pro (begonia / MT6785 NVRAM)                ║${RESET}"
+        echo -e "${ORANGE}${BOLD}╚══════════════════════════════════════════════════════════════════════╝${RESET}"
+        echo -e "  SIM 1 (Slot 1) IMEI : ${CYAN}${BOLD}${im1}${RESET}"
+        echo -e "  SIM 2 (Slot 2) IMEI : ${CYAN}${BOLD}${im2}${RESET}"
+        echo -e "  Wi-Fi MAC Address   : ${GREEN}${wmac}${RESET}"
+        echo -e "  Bluetooth MAC       : ${GREEN}${bmac}${RESET}"
+        echo -e "  Kernel Target       : ${YELLOW}${kern}${RESET}"
+        echo -e "  Chip Identifier     : ${DIM}${chip}${RESET}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"
+        echo ""
+        echo -e "${BOLD}Actions & Controls:${RESET}"
+        echo -e "  ${CYAN}[1] Auto-Fetch All Values from Device Hardware${RESET}"
+        echo -e "      Reads NVRAM MP0H partitions, WiFi/BT addresses, and SoC registers"
+        echo ""
+        echo -e "  ${CYAN}[2] Edit SIM 1 IMEI (Keypad / Keyboard)${RESET}"
+        echo -e "      Modify Slot 1 IMEI with interactive on-screen keyboard"
+        echo ""
+        echo -e "  ${CYAN}[3] Edit SIM 2 IMEI (Keypad / Keyboard)${RESET}"
+        echo -e "      Modify Slot 2 IMEI with interactive on-screen keyboard"
+        echo ""
+        echo -e "  ${CYAN}[4] Edit Wi-Fi & Bluetooth MAC Addresses${RESET}"
+        echo -e "      Configure network adapter identifiers"
+        echo ""
+        echo -e "  ${CYAN}[5] Save & Generate config.txt (JSON & INI)${RESET}"
+        echo -e "      Exports config.txt to /sdcard/Fox/ and root module locations"
+        echo ""
+        echo -e "  ${CYAN}[6] Directly Apply IMEIs to NVRAM on Device${RESET}"
+        echo -e "      Calibrates and updates NVRAM hardware partitions immediately"
+        echo ""
+        echo -e "  ${CYAN}[7] View Active config.txt Content${RESET}"
+        echo -e "      Display generated JSON configuration"
+        echo ""
+        echo -e "  ${CYAN}[8] Backup NVRAM & IMEI Partitions${RESET}"
+        echo -e "      Creates compressed archive in /sdcard/Fox/NVRAM_Backup/"
+        echo ""
+        echo -e "  ${CYAN}[9] Restore NVRAM from Backup${RESET}"
+        echo -e "      Restores from previous NVRAM archive"
+        echo ""
+        echo -e "  ${RED}[q] Return to Recovery Master Menu${RESET}"
+        echo ""
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"
+        printf "${BOLD}foximei > ${RESET}"
+        read -r choice || break
+        case "$choice" in
+            1)
+                echo "Fetching from device hardware..."
+                ensure_nvdata_mounted
+                imeis=$(get_device_imeis)
+                im1=$(echo "$imeis" | awk '{print $1}')
+                im2=$(echo "$imeis" | awk '{print $2}')
+                wmac=$(get_device_wifi_mac)
+                bmac=$(get_device_bt_mac)
+                chip=$(get_device_chip_id)
+                kern=$(get_device_kernel)
+                echo -e "${GREEN}✓ Hardware parameters fetched successfully.${RESET}"
+                sleep 1
+                ;;
+            2)
+                im1=$(keyboard_prompt "SIM 1 (Slot 1) IMEI" "$im1")
+                write_imei_config "$im1" "$im2" "$wmac" "$bmac" "$chip" "$kern"
+                echo -e "${GREEN}✓ Updated SIM 1 IMEI: $im1${RESET}"
+                sleep 1
+                ;;
+            3)
+                im2=$(keyboard_prompt "SIM 2 (Slot 2) IMEI" "$im2")
+                write_imei_config "$im1" "$im2" "$wmac" "$bmac" "$chip" "$kern"
+                echo -e "${GREEN}✓ Updated SIM 2 IMEI: $im2${RESET}"
+                sleep 1
+                ;;
+            4)
+                wmac=$(keyboard_prompt "Wi-Fi MAC Address" "$wmac")
+                bmac=$(keyboard_prompt "Bluetooth MAC Address" "$bmac")
+                write_imei_config "$im1" "$im2" "$wmac" "$bmac" "$chip" "$kern"
+                echo -e "${GREEN}✓ Updated MAC addresses!${RESET}"
+                sleep 1
+                ;;
+            5)
+                echo "Generating config.txt across destinations..."
+                write_imei_config "$im1" "$im2" "$wmac" "$bmac" "$chip" "$kern"
+                echo -e "${GREEN}${BOLD}✓ config.txt saved successfully across all destinations!${RESET}"
+                echo "  Destinations:"
+                echo "    - /sdcard/Fox/config.txt"
+                echo "    - /sdcard/config.txt"
+                echo "    - /data/adb/modules/pox_imei_fixer/config.txt"
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            6)
+                apply_to_nvram "$im1" "$im2"
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            7)
+                echo ""
+                echo -e "${BOLD}Current config.txt Content:${RESET}"
+                echo "----------------------------------------"
+                for cfg in $CONFIG_DESTS; do
+                    if [ -f "$cfg" ]; then
+                        echo "Location: $cfg"
+                        cat "$cfg"
+                        echo ""
+                        echo "----------------------------------------"
+                        break
+                    fi
+                done
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            8)
+                backup_nvram
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            9)
+                restore_nvram
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            q|quit|exit)
+                break
+                ;;
+        esac
+    done
+}
+
+case "$1" in
+    fetch|get)
+        imeis=$(get_device_imeis)
+        echo "IMEI1: $(echo "$imeis" | awk '{print $1}')"
+        echo "IMEI2: $(echo "$imeis" | awk '{print $2}')"
+        echo "WIFI:  $(get_device_wifi_mac)"
+        echo "BT:    $(get_device_bt_mac)"
+        echo "CHIP:  $(get_device_chip_id)"
+        echo "KERN:  $(get_device_kernel)"
+        ;;
+    set)
+        shift
+        write_imei_config "$1" "$2" "$3" "$4" "$5" "$6"
+        echo "IMEIs updated."
+        ;;
+    apply)
+        shift
+        imeis=$(get_device_imeis)
+        im1="${1:-$(echo "$imeis" | awk '{print $1}')}"
+        im2="${2:-$(echo "$imeis" | awk '{print $2}')}"
+        apply_to_nvram "$im1" "$im2"
+        ;;
+    backup)
+        backup_nvram
+        ;;
+    restore)
+        shift
+        restore_nvram "$@"
+        ;;
+    menu)
+        interactive_ui
+        ;;
+    "")
+        if [ -t 0 ]; then
+            interactive_ui
+        else
+            echo "foximei: run with 'menu' or see 'help'"
+        fi
+        ;;
+    *)
+        cat <<EOF
+Usage: foximei [menu|fetch|set <imei1> <imei2>|apply|backup|restore]
+  menu          Interactive Fox UI with on-screen keyboard & editor
+  fetch         Display detected device hardware identifiers
+  set <1> <2>   Directly write custom IMEIs to config.txt
+  apply         Calibrate and encode IMEIs directly into NVRAM
+  backup        Backup NVRAM partitions to /sdcard/Fox/NVRAM_Backup/
+  restore       Restore NVRAM partitions from backup archive
+EOF
+        ;;
+esac

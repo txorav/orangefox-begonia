@@ -1,0 +1,7 @@
+id=pox_logs_dumper
+name=Begonia Pox Diagnostic Logs Dumper
+version=1.0.0
+versionCode=100
+author=txorav
+description=Interactive native Fox UI to select and package kernel, recovery, logcat, root, mounts, and hardware telemetry into a zip
+min_fox=11.0

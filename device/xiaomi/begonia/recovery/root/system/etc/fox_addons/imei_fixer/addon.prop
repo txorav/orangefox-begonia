@@ -1,0 +1,7 @@
+id=imei_fixer
+name=Begonia Native IMEI Fixer & NVRAM Manager
+version=1.0.0
+versionCode=100
+author=txorav
+description=Interactive native Fox UI with on-screen keypad to view, edit, and fix SIM1/SIM2 IMEIs and config.txt
+min_fox=11.0

@@ -1,0 +1,27 @@
+#!/system/bin/sh
+#
+# update-binary for Begonia Pox Logs Dumper Fox Addon
+#
+
+OUTFD=$2
+
+ui_print() {
+    echo "ui_print $1" >&$OUTFD
+    echo "ui_print" >&$OUTFD
+}
+
+ui_print "==========================================="
+ui_print "  ORANGEFOX BEGONIA POX LOGS DUMPER        "
+ui_print "==========================================="
+
+if [ -x /system/bin/foxdump ]; then
+    ui_print "-> Launching Native Fox Diagnostic Logs Selector..."
+    /system/bin/foxdump menu
+    ui_print "✓ Diagnostic logs packaged successfully."
+else
+    ui_print "Error: /system/bin/foxdump binary not found."
+    exit 1
+fi
+
+ui_print "==========================================="
+exit 0

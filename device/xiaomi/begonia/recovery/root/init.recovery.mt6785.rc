@@ -7,9 +7,11 @@ on early-init
     start adbd
     mkdir /Fox 0777 root root
     mkdir /Fox/FoxFiles 0777 root root
+    mkdir /Fox/FoxFiles/FoxAddons 0777 root root
     mkdir /Fox/theme 0777 root root
     mkdir /tmp/Fox 0777 root root
     mkdir /tmp/Fox/FoxFiles 0777 root root
+    mkdir /tmp/Fox/FoxFiles/FoxAddons 0777 root root
     mkdir /tmp/Fox/theme 0777 root root
 
 on init

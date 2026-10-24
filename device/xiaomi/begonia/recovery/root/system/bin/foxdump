@@ -1,0 +1,437 @@
+#!/system/bin/sh
+#
+# foxdump / poxdump - Begonia Native Fox UI Diagnostic Logs Dumper
+#
+# Interactive diagnostic logs aggregator for Redmi Note 8 Pro (begonia / MT6785).
+# Allows choosing which subsystem logs to dump and packs them into a timestamped zip,
+# strictly adhering to the PoX Begonia Log Collector archive specification.
+#
+# Specification & Structure:
+#   00-COLLECTOR-REPORT.txt  Execution summary & collection report
+#   01-pstore/               Crashed-boot kernel logs (ramoops, console, last_kmsg)
+#   02-panic-digest.txt      Kernel panic/Oops/BUG and crash lines
+#   03-flashed-kernel/       Flashed boot partition inspection & kernel banner
+#   04-dropbox/              Android crash / ANR / watchdog entries
+#   05-tombstones/           Native process tombstones
+#   06-anr/                  Application Not Responding traces
+#   07-logd/                 Logcat log buffers (main, radio, crash, events)
+#   08-persist-log/          Persist partition logs
+#   09-root/                 Root framework & modules inventory (APatch/KSU/Magisk)
+#   10-context/              Recovery + device hardware context (mounts, meminfo, etc.)
+#   99-SUMMARY.txt           Inventory overview & budget
+#   README.txt               Collector guide
+#
+# Usage:
+#   foxdump                        Interactive Fox UI selector
+#   foxdump all [destination_dir]  Dump all diagnostic logs non-interactively
+#
+
+PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
+export PATH
+
+# ANSI Colors
+BOLD="\033[1m"
+GREEN="\033[32m"
+RED="\033[31m"
+YELLOW="\033[33m"
+CYAN="\033[36m"
+MAGENTA="\033[35m"
+ORANGE="\033[38;5;208m"
+DIM="\033[2m"
+RESET="\033[0m"
+
+# Default selections (1 = enabled, 0 = disabled)
+OPT_PSTORE=1
+OPT_BOOT=1
+OPT_RECOVERY=1
+OPT_LOGCAT=1
+OPT_DROPBOX=1
+OPT_TOMBSTONES=1
+OPT_MOUNTS=1
+OPT_HARDWARE=1
+OPT_ROOT=1
+OPT_WIFI=1
+OPT_CONTAINERS=1
+
+get_dest_dir() {
+    if [ -d "/sdcard" ] && touch "/sdcard/.rw_test" 2>/dev/null; then
+        rm -f "/sdcard/.rw_test"
+        mkdir -p "/sdcard/Fox/Logs" 2>/dev/null
+        echo "/sdcard/Fox/Logs"
+    elif mountpoint -q /data 2>/dev/null; then
+        mkdir -p "/data/recovery/logs" 2>/dev/null
+        echo "/data/recovery/logs"
+    else
+        mkdir -p "/tmp/pox_logs" 2>/dev/null
+        echo "/tmp/pox_logs"
+    fi
+}
+
+dump_logs() {
+    local target_dir="$1"
+    [ -z "$target_dir" ] && target_dir=$(get_dest_dir)
+
+    local ts
+    ts=$(date '+%Y%m%d-%H%M%S' 2>/dev/null || echo "$$")
+    local archive_name="pox-begonia-logs-${ts}"
+    local work_dir="/tmp/${archive_name}"
+    rm -rf "$work_dir" 2>/dev/null
+    mkdir -p "$work_dir" 2>/dev/null
+
+    echo -e "${BOLD}Aggregating PoX Begonia Diagnostic Logs...${RESET}"
+    echo -e " Staging directory: ${CYAN}${work_dir}${RESET}"
+
+    # Initialize subdirectories
+    mkdir -p "$work_dir/01-pstore" "$work_dir/03-flashed-kernel" "$work_dir/04-dropbox" \
+             "$work_dir/05-tombstones" "$work_dir/06-anr" "$work_dir/07-logd" \
+             "$work_dir/08-persist-log" "$work_dir/09-root" "$work_dir/10-context"
+
+    local pstore_count=0
+    local dropbox_count=0
+    local tombstone_count=0
+
+    # 01-pstore: crashed-boot kernel log
+    if [ "$OPT_PSTORE" -eq 1 ]; then
+        echo "  [*] Collecting pstore / ramoops (crashed-boot kernel logs)..."
+        if [ -d /sys/fs/pstore ]; then
+            ls -la /sys/fs/pstore > "$work_dir/01-pstore/LISTING.txt" 2>/dev/null || true
+            for f in /sys/fs/pstore/*; do
+                if [ -f "$f" ]; then
+                    cp "$f" "$work_dir/01-pstore/$(basename "$f").txt" 2>/dev/null || true
+                    pstore_count=$((pstore_count + 1))
+                fi
+            done
+        fi
+        if [ -f /proc/last_kmsg ]; then
+            cp /proc/last_kmsg "$work_dir/01-pstore/last_kmsg.txt" 2>/dev/null || true
+            pstore_count=$((pstore_count + 1))
+        fi
+        mount | grep -i pstore > "$work_dir/01-pstore/mount-info.txt" 2>/dev/null || true
+
+        # 02-panic-digest.txt
+        echo "  [*] Generating kernel panic digest..."
+        {
+            echo "=== KERNEL PANIC & FAULT DIGEST ==="
+            dmesg 2>/dev/null | grep -Ei "panic|oops|kernel BUG|call trace|null pointer|watchdog|fatal|oom-killer" || true
+            if [ -d "$work_dir/01-pstore" ]; then
+                grep -Eih "panic|oops|kernel BUG|call trace|null pointer|watchdog" "$work_dir/01-pstore/"*.txt 2>/dev/null || true
+            fi
+        } > "$work_dir/02-panic-digest.txt" 2>/dev/null || true
+    fi
+
+    # 03-flashed-kernel: boot partition inspection
+    if [ "$OPT_BOOT" -eq 1 ]; then
+        echo "  [*] Extracting boot partition & flashed kernel banner..."
+        local boot_dev="/dev/block/by-name/boot"
+        [ ! -e "$boot_dev" ] && boot_dev="/dev/block/bootdevice/by-name/boot"
+        [ ! -e "$boot_dev" ] && boot_dev="/dev/block/platform/bootdevice/by-name/boot"
+
+        echo "Boot Partition: $boot_dev" > "$work_dir/03-flashed-kernel/boot-partition.txt"
+        if [ -e "$boot_dev" ]; then
+            # Dump boot header (first 8KB)
+            dd if="$boot_dev" of="$work_dir/03-flashed-kernel/boot-header-dump.txt" bs=1024 count=8 2>/dev/null || true
+            # Extract kernel version banner from first 24MB
+            dd if="$boot_dev" bs=1M count=24 2>/dev/null | strings | grep "Linux version" | head -n 3 > "$work_dir/03-flashed-kernel/linux-version.txt" 2>/dev/null || true
+            dd if="$boot_dev" bs=1M count=24 2>/dev/null | strings | grep -Ei "Pox|Onyx|Sultan|APatch|KSU|Magisk|Begonia" | head -n 10 > "$work_dir/03-flashed-kernel/branding.txt" 2>/dev/null || true
+        fi
+    fi
+
+    # 04-dropbox: crash/ANR entries from /data
+    if [ "$OPT_DROPBOX" -eq 1 ]; then
+        echo "  [*] Collecting Android Dropbox crash logs..."
+        if [ -d /data/system/dropbox ]; then
+            for f in /data/system/dropbox/*; do
+                if [ -f "$f" ]; then
+                    cp "$f" "$work_dir/04-dropbox/" 2>/dev/null || true
+                    dropbox_count=$((dropbox_count + 1))
+                fi
+            done
+            ls -la /data/system/dropbox > "$work_dir/04-dropbox/CRASH-ENTRIES.txt" 2>/dev/null || true
+        fi
+    fi
+
+    # 05-tombstones & 06-anr
+    if [ "$OPT_TOMBSTONES" -eq 1 ]; then
+        echo "  [*] Collecting Native Process Tombstones & ANR Traces..."
+        if [ -d /data/tombstones ]; then
+            for f in /data/tombstones/*; do
+                if [ -f "$f" ]; then
+                    cp "$f" "$work_dir/05-tombstones/" 2>/dev/null || true
+                    tombstone_count=$((tombstone_count + 1))
+                fi
+            done
+        fi
+        if [ -d /data/anr ]; then
+            cp -r /data/anr/* "$work_dir/06-anr/" 2>/dev/null || true
+        fi
+    fi
+
+    # 07-logd: logcat buffers
+    if [ "$OPT_LOGCAT" -eq 1 ]; then
+        echo "  [*] Capturing Android Logcat buffers..."
+        if command -v logcat >/dev/null 2>&1; then
+            logcat -d > "$work_dir/07-logd/logcat_main.txt" 2>/dev/null || true
+            logcat -b radio -d > "$work_dir/07-logd/logcat_radio.txt" 2>/dev/null || true
+            logcat -b crash -d > "$work_dir/07-logd/logcat_crash.txt" 2>/dev/null || true
+            logcat -b system -d > "$work_dir/07-logd/logcat_system.txt" 2>/dev/null || true
+            logcat -b events -d > "$work_dir/07-logd/logcat_events.txt" 2>/dev/null || true
+        fi
+        if [ -d /data/misc/logd ]; then
+            ls -la /data/misc/logd > "$work_dir/07-logd/logd-data-misc.txt" 2>/dev/null || true
+        fi
+    fi
+
+    # 08-persist-log
+    echo "  [*] Collecting persist partition logs..."
+    for p in /mnt/vendor/persist /persist; do
+        if [ -d "$p" ]; then
+            find "$p" -type f -name "*log*" -exec cp {} "$work_dir/08-persist-log/" \; 2>/dev/null || true
+        fi
+    done
+
+    # 09-root: root framework inventory
+    if [ "$OPT_ROOT" -eq 1 ]; then
+        echo "  [*] Analyzing Root Framework & Active Modules..."
+        {
+            echo "=== ROOT FRAMEWORK INVENTORY ==="
+            /system/bin/rootmanager detect 2>/dev/null || echo "None detected"
+            echo ""
+            echo "=== RECOVERY CONTEXT ==="
+            id
+            getenforce 2>/dev/null || echo "SELinux: Disabled"
+        } > "$work_dir/09-root/recovery-root-context.txt" 2>/dev/null || true
+
+        if [ -d /data/adb ]; then
+            ls -laR /data/adb > "$work_dir/09-root/data-adb-listing.txt" 2>/dev/null || true
+        fi
+    fi
+
+    # 10-context: recovery + device context
+    if [ "$OPT_MOUNTS" -eq 1 ] || [ "$OPT_HARDWARE" -eq 1 ]; then
+        echo "  [*] Collecting System Context & Telemetry..."
+        getprop > "$work_dir/10-context/getprop.txt" 2>/dev/null || true
+        [ -f /tmp/recovery.log ] && cp /tmp/recovery.log "$work_dir/10-context/recovery.txt" 2>/dev/null || true
+        [ -f /Fox/FoxFiles/OrangeFox.log ] && cp /Fox/FoxFiles/OrangeFox.log "$work_dir/10-context/OrangeFox.log" 2>/dev/null || true
+        [ -f /proc/cpuinfo ] && cp /proc/cpuinfo "$work_dir/10-context/cpuinfo.txt" 2>/dev/null || true
+        [ -f /proc/meminfo ] && cp /proc/meminfo "$work_dir/10-context/meminfo.txt" 2>/dev/null || true
+        mount > "$work_dir/10-context/mounts.txt" 2>/dev/null || true
+        [ -f /proc/partitions ] && cp /proc/partitions "$work_dir/10-context/partitions.txt" 2>/dev/null || true
+        [ -f /proc/uptime ] && cp /proc/uptime "$work_dir/10-context/uptime.txt" 2>/dev/null || true
+        [ -f /proc/interrupts ] && cp /proc/interrupts "$work_dir/10-context/interrupts.txt" 2>/dev/null || true
+        if [ -f /proc/config.gz ]; then
+            zcat /proc/config.gz > "$work_dir/10-context/kernel-config.txt" 2>/dev/null || cp /proc/config.gz "$work_dir/10-context/" 2>/dev/null || true
+        fi
+        ls -la /dev/block/by-name > "$work_dir/10-context/partitions-by-name.txt" 2>/dev/null || true
+        cat /etc/recovery.fstab /vendor/etc/fstab* > "$work_dir/10-context/fstab.txt" 2>/dev/null || true
+
+        # Telemetry
+        if [ -x /system/bin/fastcharge ]; then
+            /system/bin/fastcharge status > "$work_dir/10-context/battery_telemetry.txt" 2>/dev/null || true
+        fi
+        if [ -x /system/bin/foxwifi ]; then
+            /system/bin/foxwifi diag > "$work_dir/10-context/wifi_diagnostics.txt" 2>/dev/null || true
+        fi
+        if [ -x /system/bin/foxcontainer ]; then
+            /system/bin/foxcontainer list > "$work_dir/10-context/containers_list.txt" 2>/dev/null || true
+        fi
+    fi
+
+    # 00-COLLECTOR-REPORT.txt
+    cat <<EOF > "$work_dir/00-COLLECTOR-REPORT.txt"
+PoX Begonia Log Collector
+collected : $(date 2>/dev/null || echo "N/A")
+staging   : $work_dir
+note      : read-only collection, nothing was flashed
+----------------------------------------------------------------
+======================================================
+ PoX Begonia  -  Log Collector
+ Staging in: $work_dir
+======================================================
+  [*] pstore / ramoops (crashed-boot kernel log)
+  [+] $pstore_count pstore record(s) captured
+  [*] identifying the kernel really present in the boot partition
+  [*] dropbox ($dropbox_count entries) / tombstones ($tombstone_count) / ANR / logd
+  [*] root and patch framework state
+  [*] device and recovery context
+
+  -- summary -----------------------------------------
+  [+] pstore records : $pstore_count
+  [+] dropbox logs   : $dropbox_count
+  [+] tombstones     : $tombstone_count
+  [*] archiving
+EOF
+
+    # 99-SUMMARY.txt
+    cat <<EOF > "$work_dir/99-SUMMARY.txt"
+==============================================================
+ PoX Begonia - log collection summary
+==============================================================
+collected  : $(date 2>/dev/null || echo "N/A")
+staging    : $work_dir
+device     : begonia
+kernel     : $(uname -r 2>/dev/null || echo "N/A")
+
+--- top level inventory
+      01-pstore              $(ls -1 "$work_dir/01-pstore" 2>/dev/null | wc -l) files
+      03-flashed-kernel      $(ls -1 "$work_dir/03-flashed-kernel" 2>/dev/null | wc -l) files
+      04-dropbox             $dropbox_count files
+      05-tombstones          $tombstone_count files
+      06-anr                 $(ls -1 "$work_dir/06-anr" 2>/dev/null | wc -l) files
+      07-logd                $(ls -1 "$work_dir/07-logd" 2>/dev/null | wc -l) files
+      09-root                $(ls -1 "$work_dir/09-root" 2>/dev/null | wc -l) files
+      10-context             $(ls -1 "$work_dir/10-context" 2>/dev/null | wc -l) files
+
+NOTE: dmesg run inside recovery shows the RECOVERY kernel,
+      never the kernel that crashed. Use 01-pstore/ for that.
+EOF
+
+    # README.txt
+    cat <<EOF > "$work_dir/README.txt"
+==============================================================
+ PoX Begonia - Log Collector archive
+==============================================================
+Collected : $(date 2>/dev/null || echo "N/A")
+Device    : begonia
+Recovery  : OrangeFox Recovery R12 Begonia Unified
+
+Read 99-SUMMARY.txt first, then:
+  00-COLLECTOR-REPORT.txt  what the collector did
+  01-pstore/               crashed-boot kernel log (ramoops)
+  02-panic-digest.txt      panic/oops lines from the above
+  03-flashed-kernel/       kernel banner read from the boot partition
+  04-dropbox/              Android crash / ANR / watchdog entries
+  05-tombstones/           native tombstones
+  06-anr/                  ANR traces
+  07-logd/                 logd buffers
+  08-persist-log/          persist partition logs
+  09-root/                 root/patch framework inventory
+  10-context/              recovery + device context
+EOF
+
+    # Packaging
+    local zip_file="$target_dir/${archive_name}.zip"
+    local tar_file="$target_dir/${archive_name}.tar.gz"
+    echo -e "${BOLD}Compressing PoX Begonia logs package...${RESET}"
+    (cd "$work_dir" && tar -czf "$tar_file" . 2>/dev/null)
+
+    local final_file="$tar_file"
+    if command -v zip >/dev/null 2>&1; then
+        (cd "$work_dir" && zip -rq "$zip_file" . 2>/dev/null)
+        final_file="$zip_file"
+    fi
+    rm -rf "$work_dir"
+
+    if [ -s "$final_file" ]; then
+        local sz
+        sz=$(ls -lh "$final_file" 2>/dev/null | awk '{print $5}')
+        echo ""
+        echo -e "${GREEN}${BOLD}======================================================================${RESET}"
+        echo -e "${GREEN}${BOLD}✓ PoX Begonia Diagnostic Logs Archive Created Successfully!          ${RESET}"
+        echo -e "${GREEN}${BOLD}======================================================================${RESET}"
+        echo -e " Archive File : ${CYAN}${BOLD}${final_file}${RESET} (${sz})"
+        echo -e " Pull via ADB : ${YELLOW}adb pull ${final_file}${RESET}"
+        echo ""
+        return 0
+    else
+        echo -e "${RED}Error: Failed to create diagnostic log archive.${RESET}"
+        return 1
+    fi
+}
+
+toggle_opt() {
+    local val="$1"
+    [ "$val" -eq 1 ] && echo 0 || echo 1
+}
+
+badge() {
+    local val="$1"
+    [ "$val" -eq 1 ] && echo -e "${GREEN}[ENABLED]${RESET}" || echo -e "${RED}[DISABLED]${RESET}"
+}
+
+interactive_menu() {
+    while true; do
+        clear 2>/dev/null || echo ""
+        echo -e "${ORANGE}${BOLD}╔══════════════════════════════════════════════════════════════════════╗${RESET}"
+        echo -e "${ORANGE}${BOLD}║           POX DIAGNOSTIC LOGS DUMPER & RECOVERY RECORDER             ║${RESET}"
+        echo -e "${ORANGE}${BOLD}║           Redmi Note 8 Pro (begonia / MediaTek MT6785)               ║${RESET}"
+        echo -e "${ORANGE}${BOLD}╚══════════════════════════════════════════════════════════════════════╝${RESET}"
+        echo -e " Target Output Directory: ${CYAN}$(get_dest_dir)${RESET}"
+        echo ""
+        echo -e "${BOLD}Select logs to include in archive (toggle by number):${RESET}"
+        echo -e "  [1] Kernel pstore / ramoops / panic digest  : $(badge $OPT_PSTORE)"
+        echo -e "  [2] Flashed Kernel & Boot Header Inspection : $(badge $OPT_BOOT)"
+        echo -e "  [3] Recovery Runtime Logs (/tmp/recovery)   : $(badge $OPT_RECOVERY)"
+        echo -e "  [4] Android Logcat Buffers (Radio/Crash)    : $(badge $OPT_LOGCAT)"
+        echo -e "  [5] Dropbox Crashes & Watchdogs (/data)     : $(badge $OPT_DROPBOX)"
+        echo -e "  [6] Native Tombstones & ANR Traces          : $(badge $OPT_TOMBSTONES)"
+        echo -e "  [7] Partition Mounts, Fstab & Crypto Policy : $(badge $OPT_MOUNTS)"
+        echo -e "  [8] Hardware, Battery & Thermal Sensors     : $(badge $OPT_HARDWARE)"
+        echo -e "  [9] Root Framework & Modules Inventory      : $(badge $OPT_ROOT)"
+        echo -e "  [0] Wi-Fi Networking & Modem Telemetry      : $(badge $OPT_WIFI)"
+        echo ""
+        echo -e "  ${GREEN}${BOLD}[D] DUMP SELECTED LOGS NOW${RESET}"
+        echo -e "  ${CYAN}[A] Enable All Logs${RESET}"
+        echo -e "  ${YELLOW}[N] Disable All Logs${RESET}"
+        echo -e "  ${RED}[q] Return to Recovery Master Menu${RESET}"
+        echo ""
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────${RESET}"
+        printf "${BOLD}foxdump > ${RESET}"
+        read -r choice || break
+        case "$choice" in
+            1) OPT_PSTORE=$(toggle_opt $OPT_PSTORE) ;;
+            2) OPT_BOOT=$(toggle_opt $OPT_BOOT) ;;
+            3) OPT_RECOVERY=$(toggle_opt $OPT_RECOVERY) ;;
+            4) OPT_LOGCAT=$(toggle_opt $OPT_LOGCAT) ;;
+            5) OPT_DROPBOX=$(toggle_opt $OPT_DROPBOX) ;;
+            6) OPT_TOMBSTONES=$(toggle_opt $OPT_TOMBSTONES) ;;
+            7) OPT_MOUNTS=$(toggle_opt $OPT_MOUNTS) ;;
+            8) OPT_HARDWARE=$(toggle_opt $OPT_HARDWARE) ;;
+            9) OPT_ROOT=$(toggle_opt $OPT_ROOT) ;;
+            0) OPT_WIFI=$(toggle_opt $OPT_WIFI) ;;
+            a|A)
+                OPT_PSTORE=1; OPT_BOOT=1; OPT_RECOVERY=1; OPT_LOGCAT=1
+                OPT_DROPBOX=1; OPT_TOMBSTONES=1; OPT_MOUNTS=1; OPT_HARDWARE=1
+                OPT_ROOT=1; OPT_WIFI=1
+                ;;
+            n|N)
+                OPT_PSTORE=0; OPT_BOOT=0; OPT_RECOVERY=0; OPT_LOGCAT=0
+                OPT_DROPBOX=0; OPT_TOMBSTONES=0; OPT_MOUNTS=0; OPT_HARDWARE=0
+                OPT_ROOT=0; OPT_WIFI=0
+                ;;
+            d|D|dump)
+                dump_logs
+                echo "Press Enter to continue..."; read -r _
+                ;;
+            q|quit|exit)
+                break
+                ;;
+        esac
+    done
+}
+
+case "$1" in
+    all|dump)
+        shift
+        OPT_PSTORE=1; OPT_BOOT=1; OPT_RECOVERY=1; OPT_LOGCAT=1
+        OPT_DROPBOX=1; OPT_TOMBSTONES=1; OPT_MOUNTS=1; OPT_HARDWARE=1
+        OPT_ROOT=1; OPT_WIFI=1
+        dump_logs "$@"
+        ;;
+    menu)
+        interactive_menu
+        ;;
+    "")
+        if [ -t 0 ]; then
+            interactive_menu
+        else
+            echo "foxdump: run with 'menu' or 'all'"
+        fi
+        ;;
+    *)
+        cat <<EOF
+Usage: foxdump [menu|all [dest_dir]]
+  menu              Launch interactive Fox UI selector
+  all [dest_dir]    Dump all diagnostic logs to destination
+EOF
+        ;;
+esac

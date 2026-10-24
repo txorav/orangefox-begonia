@@ -154,6 +154,9 @@ jobs:
           mkdir -p "$SRC_DIR/device/xiaomi"
           rm -rf "$SRC_DIR/device/xiaomi/begonia"
           cp -a device/xiaomi/begonia "$SRC_DIR/device/xiaomi/begonia"
+          if [ -x "$SRC_DIR/device/xiaomi/begonia/package_fox_addons.sh" ]; then
+            "$SRC_DIR/device/xiaomi/begonia/package_fox_addons.sh"
+          fi
 
       - name: Prepare Wi-Fi and networking sources
         run: |

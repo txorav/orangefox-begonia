@@ -308,6 +308,96 @@ if [ -f "$BUILD_YML" ]; then
 fi
 
 # -----------------------------------------------------------------------------
+# 8. Fox Addons, IMEI Fixer & PoX Diagnostic Logs Dumper
+# -----------------------------------------------------------------------------
+echo ""
+echo "--- [8] Validating Fox Addons, IMEI Fixer & Logs Dumper ---"
+
+# 8.1 Fox Addons Packaging & Ramdisk Presence
+assert_file_exists "$DIR/package_fox_addons.sh" "Addon packaging utility"
+assert_file_exists "$DIR/addons/imei_fixer.zip" "Packaged imei_fixer.zip"
+assert_file_exists "$DIR/addons/pox_logs_dumper.zip" "Packaged pox_logs_dumper.zip"
+assert_file_exists "$DIR/recovery/root/Fox/FoxFiles/FoxAddons/imei_fixer.zip" "Ramdisk FoxAddon imei_fixer.zip"
+assert_file_exists "$DIR/recovery/root/Fox/FoxFiles/FoxAddons/pox_logs_dumper.zip" "Ramdisk FoxAddon pox_logs_dumper.zip"
+
+# Check addon.prop metadata
+for addon in imei_fixer pox_logs_dumper; do
+    prop="$ETC_DIR/fox_addons/$addon/addon.prop"
+    assert_file_exists "$prop" "Fox addon $addon property file"
+    if grep -q "id=$addon" "$prop"; then
+        test_pass "addon.prop ($addon) contains valid ID"
+    else
+        test_fail "addon.prop ($addon)" "Missing valid id"
+    fi
+    assert_file_exists "$ETC_DIR/fox_addons/$addon/META-INF/com/google/android/update-binary" "$addon update-binary"
+    assert_file_exists "$ETC_DIR/fox_addons/$addon/META-INF/com/google/android/updater-script" "$addon updater-script"
+done
+
+# 8.2 foximei Tests
+assert_file_exists "$BIN_DIR/foximei" "foximei executable"
+IMEI_SANDBOX="/tmp/foximei_test_$$"
+mkdir -p "$IMEI_SANDBOX/Fox" "$IMEI_SANDBOX/nvdata/md/NVRAM/NVD_IMEI"
+touch "$IMEI_SANDBOX/nvdata/md/NVRAM/NVD_IMEI/MP0H_000"
+touch "$IMEI_SANDBOX/nvdata/md/NVRAM/NVD_IMEI/MP0H_001"
+
+# Test config.txt generation and JSON format
+CONFIG_DESTS="$IMEI_SANDBOX/Fox/config.txt" sh "$BIN_DIR/foximei" set '860000000000001' '860000000000002' '00:11:22:33:44:55' '00:11:22:33:44:66' '0x00000000000000000000000000000000' '4.14.356-openela-rc1-Suzakukernel-V2' >/dev/null 2>&1
+
+if [ -f "$IMEI_SANDBOX/Fox/config.txt" ]; then
+    test_pass "foximei: config.txt successfully generated"
+    if grep -q '"patch_cert": 1' "$IMEI_SANDBOX/Fox/config.txt" && \
+       grep -q '"imei_1":   "860000000000001"' "$IMEI_SANDBOX/Fox/config.txt" && \
+       grep -q '"imei_2":   "860000000000002"' "$IMEI_SANDBOX/Fox/config.txt" && \
+       grep -q '"wifi_mac": "00:11:22:33:44:55"' "$IMEI_SANDBOX/Fox/config.txt" && \
+       grep -q '"bt_mac":   "00:11:22:33:44:66"' "$IMEI_SANDBOX/Fox/config.txt" && \
+       grep -q '"device":   "begonia"' "$IMEI_SANDBOX/Fox/config.txt"; then
+        test_pass "foximei: config.txt matches official mtk_imei_v2 & pox-imei-fixer JSON schema"
+    else
+        test_fail "foximei" "config.txt schema does not match required JSON structure"
+    fi
+else
+    test_fail "foximei" "Failed to generate config.txt"
+fi
+
+# Test BCD Encoding
+BCD_OUT="$IMEI_SANDBOX/nvdata/md/NVRAM/NVD_IMEI/MP0H_000"
+NVDATA_DIR="$IMEI_SANDBOX/nvdata" NVRAM_FILE_1="$BCD_OUT" NVRAM_FILE_2="$IMEI_SANDBOX/nvdata/md/NVRAM/NVD_IMEI/MP0H_001" sh "$BIN_DIR/foximei" apply '860000000000001' '860000000000002' >/dev/null 2>&1
+
+if [ -s "$BCD_OUT" ] && [ "$(wc -c < "$BCD_OUT")" -eq 8 ]; then
+    test_pass "foximei: MTK BCD encoding produces exact 8-byte NVRAM payload"
+else
+    test_fail "foximei" "BCD encoding failed or output size != 8 bytes"
+fi
+rm -rf "$IMEI_SANDBOX"
+
+# 8.3 foxdump Tests
+assert_file_exists "$BIN_DIR/foxdump" "foxdump executable"
+DUMP_SANDBOX="/tmp/foxdump_test_$$"
+mkdir -p "$DUMP_SANDBOX"
+
+# Run non-interactive dump
+sh "$BIN_DIR/foxdump" all "$DUMP_SANDBOX" >/dev/null 2>&1
+
+# Check created archive
+DUMP_PKG=$(ls -1t "$DUMP_SANDBOX"/pox-begonia-logs-*.tar.gz "$DUMP_SANDBOX"/pox-begonia-logs-*.zip 2>/dev/null | head -n 1)
+if [ -n "$DUMP_PKG" ] && [ -s "$DUMP_PKG" ]; then
+    test_pass "foxdump: Created diagnostic log archive ($DUMP_PKG)"
+    
+    # Inspect archive contents
+    ARCHIVE_CONTENTS=$(tar -tzf "$DUMP_PKG" 2>/dev/null || unzip -l "$DUMP_PKG" 2>/dev/null)
+    for expected_item in "00-COLLECTOR-REPORT.txt" "01-pstore" "02-panic-digest.txt" "03-flashed-kernel" "09-root" "10-context" "99-SUMMARY.txt" "README.txt"; do
+        if echo "$ARCHIVE_CONTENTS" | grep -q "$expected_item"; then
+            test_pass "foxdump: Archive contains $expected_item"
+        else
+            test_fail "foxdump" "Archive missing required item: $expected_item"
+        fi
+    done
+else
+    test_fail "foxdump" "Failed to generate diagnostic logs archive"
+fi
+rm -rf "$DUMP_SANDBOX"
+
+# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 echo ""
