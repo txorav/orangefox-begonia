@@ -1,0 +1,83 @@
+<?xml version="1.0"?>
+<recovery>
+	<pages>
+		<page name="wifi_manager">
+			<template name="page"/>
+
+			<text style="text_l">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>Wi-Fi Manager</text>
+			</text>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row4_header_y%"/>
+				<text>Wireless Connection</text>
+			</text>
+
+			<!-- SSID Input -->
+			<text style="text_m_accent">
+				<placement x="%indent%" y="%row1a_y%"/>
+				<text>Network SSID:</text>
+			</text>
+
+			<input>
+				<placement x="%indent%" y="%row2_input_y%" w="%content_width%" h="%input_height%"/>
+				<text>%tw_wifi_ssid%</text>
+				<data name="tw_wifi_ssid"/>
+			</input>
+
+			<fill color="%accent_color%">
+				<placement x="%indent%" y="%row3a_y%" w="%content_width%" h="2"/>
+			</fill>
+
+			<!-- PSK / Password Input -->
+			<text style="text_m_accent">
+				<placement x="%indent%" y="%row4_y%"/>
+				<text>Wi-Fi Password / Key:</text>
+			</text>
+
+			<input>
+				<placement x="%indent%" y="%row4_input_y%" w="%content_width%" h="%input_height%"/>
+				<text>%tw_wifi_psk%</text>
+				<data name="tw_wifi_psk"/>
+			</input>
+
+			<fill color="%accent_color%">
+				<placement x="%indent%" y="%row5a_y%" w="%content_width%" h="2"/>
+			</fill>
+
+			<!-- Touch Action Buttons -->
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row7_y%"/>
+				<text>Connect to Wi-Fi</text>
+				<actions>
+					<action function="cmd">/system/bin/foxwifi connect "%tw_wifi_ssid%" "%tw_wifi_psk%"</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row9_y%"/>
+				<text>Scan Nearby Networks</text>
+				<actions>
+					<action function="cmd">/system/bin/foxwifi scan</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row11_y%"/>
+				<text>Check IP &amp; Link Status</text>
+				<actions>
+					<action function="cmd">/system/bin/foxwifi status</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row13_y%"/>
+				<text>Disconnect Wi-Fi</text>
+				<actions>
+					<action function="cmd">/system/bin/foxwifi disconnect</action>
+				</actions>
+			</button>
+		</page>
+	</pages>
+</recovery>

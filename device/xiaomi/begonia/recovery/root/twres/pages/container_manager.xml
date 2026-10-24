@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<recovery>
+	<pages>
+		<page name="container_manager">
+			<template name="page"/>
+
+			<text style="text_l">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>Linux Container</text>
+			</text>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row4_header_y%"/>
+				<text>In-RAM Alpine Linux</text>
+			</text>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row2_y%"/>
+				<text>Start Linux Container</text>
+				<actions>
+					<action function="cmd">/system/bin/foxcontainer start</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row4_y%"/>
+				<text>Stop Linux Container</text>
+				<actions>
+					<action function="cmd">/system/bin/foxcontainer stop</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row6_y%"/>
+				<text>Check Container Status</text>
+				<actions>
+					<action function="cmd">/system/bin/foxcontainer status</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row8_y%"/>
+				<text>Mount Container Rootfs</text>
+				<actions>
+					<action function="cmd">/system/bin/foxcontainer mount</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row10_y%"/>
+				<text>Export Container Tarball to SDCard</text>
+				<actions>
+					<action function="set">tw_back=container_manager</action>
+					<action function="set">tw_action=cmd</action>
+					<action function="set">tw_action_param=/system/bin/foxcontainer export</action>
+					<action function="set">tw_text1=Export In-RAM Container?</action>
+					<action function="set">tw_text2=Saves full rootfs snapshot to /sdcard/</action>
+					<action function="set">tw_action_text1=Compressing container rootfs...</action>
+					<action function="set">tw_complete_text1=Container Export Complete</action>
+					<action function="set">tw_slider_text=Swipe to Export</action>
+					<action function="page">confirm_action</action>
+				</actions>
+			</button>
+		</page>
+	</pages>
+</recovery>

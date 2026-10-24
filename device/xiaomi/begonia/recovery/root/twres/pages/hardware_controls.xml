@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<recovery>
+	<pages>
+		<page name="hardware_controls">
+			<template name="page"/>
+
+			<text style="text_l">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>Hardware Controls</text>
+			</text>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row4_header_y%"/>
+				<text>Begonia MT6785 Drivers</text>
+			</text>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row2_y%"/>
+				<text>Toggle Flashlight / Torch</text>
+				<actions>
+					<action function="cmd">/system/bin/flashlight toggle</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row4_y%"/>
+				<text>Torch Max Brightness (2047)</text>
+				<actions>
+					<action function="cmd">/system/bin/flashlight 2047</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row6_y%"/>
+				<text>Toggle Double Tap To Wake (DT2W)</text>
+				<actions>
+					<action function="cmd">/system/bin/dt2w toggle</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row8_y%"/>
+				<text>Enable 18W Fast Charging (MT6360)</text>
+				<actions>
+					<action function="cmd">/system/bin/fastcharge boost</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row10_y%"/>
+				<text>Capture Recovery Screenshot</text>
+				<actions>
+					<action function="cmd">/system/bin/screenshot</action>
+				</actions>
+			</button>
+		</page>
+	</pages>
+</recovery>

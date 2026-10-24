@@ -410,7 +410,28 @@ interactive_menu() {
 }
 
 case "$1" in
-    all|dump)
+    dump)
+        shift
+        if [ "$#" -ge 2 ] && { [ "$1" = "0" ] || [ "$1" = "1" ]; }; then
+            OPT_PSTORE="${1:-1}"
+            OPT_RECOVERY="${2:-1}"
+            OPT_LOGCAT="${3:-1}"
+            OPT_TOMBSTONES="${4:-1}"
+            OPT_DROPBOX="${5:-1}"
+            OPT_MOUNTS="${6:-1}"
+            OPT_HARDWARE="${7:-1}"
+            OPT_ROOT="${8:-1}"
+            OPT_WIFI="${9:-1}"
+            OPT_BOOT="$OPT_PSTORE"
+            dump_logs ""
+        else
+            OPT_PSTORE=1; OPT_BOOT=1; OPT_RECOVERY=1; OPT_LOGCAT=1
+            OPT_DROPBOX=1; OPT_TOMBSTONES=1; OPT_MOUNTS=1; OPT_HARDWARE=1
+            OPT_ROOT=1; OPT_WIFI=1
+            dump_logs "$@"
+        fi
+        ;;
+    all)
         shift
         OPT_PSTORE=1; OPT_BOOT=1; OPT_RECOVERY=1; OPT_LOGCAT=1
         OPT_DROPBOX=1; OPT_TOMBSTONES=1; OPT_MOUNTS=1; OPT_HARDWARE=1

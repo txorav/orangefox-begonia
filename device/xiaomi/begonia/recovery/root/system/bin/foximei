@@ -510,16 +510,26 @@ interactive_ui() {
 case "$1" in
     fetch|get)
         imeis=$(get_device_imeis)
-        echo "IMEI1: $(echo "$imeis" | awk '{print $1}')"
-        echo "IMEI2: $(echo "$imeis" | awk '{print $2}')"
+        im1=$(echo "$imeis" | awk '{print $1}')
+        im2=$(echo "$imeis" | awk '{print $2}')
+        echo "IMEI1: $im1"
+        echo "IMEI2: $im2"
         echo "WIFI:  $(get_device_wifi_mac)"
         echo "BT:    $(get_device_bt_mac)"
         echo "CHIP:  $(get_device_chip_id)"
         echo "KERN:  $(get_device_kernel)"
+        if command -v twrp >/dev/null 2>&1; then
+            twrp set tw_imei_1 "$im1" 2>/dev/null || true
+            twrp set tw_imei_2 "$im2" 2>/dev/null || true
+        fi
         ;;
     set)
         shift
         write_imei_config "$1" "$2" "$3" "$4" "$5" "$6"
+        if command -v twrp >/dev/null 2>&1; then
+            [ -n "$1" ] && twrp set tw_imei_1 "$1" 2>/dev/null || true
+            [ -n "$2" ] && twrp set tw_imei_2 "$2" 2>/dev/null || true
+        fi
         echo "IMEIs updated."
         ;;
     apply)

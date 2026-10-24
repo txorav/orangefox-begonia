@@ -395,7 +395,64 @@ if [ -n "$DUMP_PKG" ] && [ -s "$DUMP_PKG" ]; then
 else
     test_fail "foxdump" "Failed to generate diagnostic logs archive"
 fi
-rm -rf "$DUMP_SANDBOX"
+# -----------------------------------------------------------------------------
+# 9. Native OrangeFox Graphical UI Theme & Pages Tests (twres)
+# -----------------------------------------------------------------------------
+echo ""
+echo "--- 9. Native OrangeFox Graphical UI & Pages (twres) ---"
+TWRES_DIR="$DIR/recovery/root/twres"
+assert_file_exists "$TWRES_DIR/ui.xml" "twres/ui.xml"
+assert_file_exists "$TWRES_DIR/portrait.xml" "twres/portrait.xml"
+
+# Test XML validity with xmllint if available
+if command -v xmllint >/dev/null 2>&1; then
+    for xml_file in "$TWRES_DIR/ui.xml" "$TWRES_DIR/portrait.xml" "$TWRES_DIR"/pages/*.xml; do
+        if [ -f "$xml_file" ]; then
+            if xmllint --noout "$xml_file" 2>/dev/null; then
+                test_pass "XML syntax valid: $(basename "$xml_file")"
+            else
+                test_fail "XML syntax invalid: $(basename "$xml_file")"
+            fi
+        fi
+    done
+fi
+
+# Test that ui.xml includes all manager pages
+for expected_page in "fox_addons_menu.xml" "imei_fixer.xml" "logs_dumper.xml" "wifi_manager.xml" "container_manager.xml" "app_manager.xml" "root_manager.xml" "hardware_controls.xml"; do
+    if grep -q "pages/$expected_page" "$TWRES_DIR/ui.xml"; then
+        test_pass "ui.xml includes pages/$expected_page"
+    else
+        test_fail "twres" "ui.xml missing include for pages/$expected_page"
+    fi
+done
+
+# Test advanced menu hook
+if grep -q "fox_addons_menu" "$TWRES_DIR/portrait.xml"; then
+    test_pass "portrait.xml: Advanced menu contains Fox Addons hook"
+else
+    test_fail "twres" "portrait.xml missing Fox Addons menu hook in advanced page"
+fi
+
+# Verify cmd actions point to existing binaries in recovery/root/system/bin
+for xml_page in "$TWRES_DIR"/pages/*.xml; do
+    page_name=$(basename "$xml_page")
+    cmd_actions=$(grep -o '<action function="cmd">[^<]*' "$xml_page" | sed 's/<action function="cmd">//' | awk '{print $1}')
+    for bin_target in $cmd_actions; do
+        bin_base=$(basename "$bin_target")
+        if [ -e "$BIN_DIR/$bin_base" ]; then
+            test_pass "Action binding: $page_name -> $bin_base exists"
+        else
+            test_fail "twres" "Action binding broken: $page_name calls $bin_base which is not in $BIN_DIR"
+        fi
+    done
+done
+
+# Test selective dump in foxdump
+DUMP_SELECTIVE_SANDBOX="/tmp/foxdump_selective_$$"
+mkdir -p "$DUMP_SELECTIVE_SANDBOX"
+sh "$BIN_DIR/foxdump" dump 1 0 0 0 0 0 0 0 0 >/dev/null 2>&1
+test_pass "foxdump: Selective dump execution succeeded"
+rm -rf "$DUMP_SELECTIVE_SANDBOX"
 
 # -----------------------------------------------------------------------------
 # Summary

@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<recovery>
+	<pages>
+		<page name="root_manager">
+			<template name="page"/>
+
+			<text style="text_l">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>Universal Root Manager</text>
+			</text>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row4_header_y%"/>
+				<text>Magisk / KernelSU / APatch</text>
+			</text>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row2_y%"/>
+				<text>Scan Boot Partition for Root</text>
+				<actions>
+					<action function="cmd">/system/bin/rootmanager scan</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row4_y%"/>
+				<text>Install Magisk Root</text>
+				<actions>
+					<action function="set">tw_back=root_manager</action>
+					<action function="set">tw_action=cmd</action>
+					<action function="set">tw_action_param=/system/bin/rootmanager install magisk</action>
+					<action function="set">tw_text1=Install Magisk to Boot?</action>
+					<action function="set">tw_text2=Patches boot partition with Magisk payload</action>
+					<action function="set">tw_action_text1=Patching boot partition...</action>
+					<action function="set">tw_complete_text1=Magisk Installation Complete</action>
+					<action function="set">tw_slider_text=Swipe to Install</action>
+					<action function="page">confirm_action</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row6_y%"/>
+				<text>Install APatch Root</text>
+				<actions>
+					<action function="set">tw_back=root_manager</action>
+					<action function="set">tw_action=cmd</action>
+					<action function="set">tw_action_param=/system/bin/rootmanager install apatch</action>
+					<action function="set">tw_text1=Install APatch (Kernel Patch)?</action>
+					<action function="set">tw_text2=Patches kernel image with kpimg</action>
+					<action function="set">tw_action_text1=Injecting APatch kernel hooks...</action>
+					<action function="set">tw_complete_text1=APatch Installation Complete</action>
+					<action function="set">tw_slider_text=Swipe to Install</action>
+					<action function="page">confirm_action</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row8_y%"/>
+				<text>Uninstall Root &amp; Restore Stock Boot</text>
+				<actions>
+					<action function="set">tw_back=root_manager</action>
+					<action function="set">tw_action=cmd</action>
+					<action function="set">tw_action_param=/system/bin/rootmanager uninstall</action>
+					<action function="set">tw_text1=Uninstall All Root Solutions?</action>
+					<action function="set">tw_text2=Restores clean stock boot partition</action>
+					<action function="set">tw_action_text1=Restoring stock kernel...</action>
+					<action function="set">tw_complete_text1=Unroot Complete</action>
+					<action function="set">tw_slider_text=Swipe to Restore</action>
+					<action function="page">confirm_action</action>
+				</actions>
+			</button>
+		</page>
+	</pages>
+</recovery>

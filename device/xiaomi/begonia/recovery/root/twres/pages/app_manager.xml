@@ -1,0 +1,99 @@
+<?xml version="1.0"?>
+<recovery>
+	<pages>
+		<page name="app_manager">
+			<template name="page"/>
+
+			<text style="text_l">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>App &amp; Data Manager</text>
+			</text>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row4_header_y%"/>
+				<text>Package &amp; Data Tools</text>
+			</text>
+
+			<!-- Target Package Input -->
+			<text style="text_m_accent">
+				<placement x="%indent%" y="%row1a_y%"/>
+				<text>App Package (e.g. com.example.app):</text>
+			</text>
+
+			<input>
+				<placement x="%indent%" y="%row2_input_y%" w="%content_width%" h="%input_height%"/>
+				<text>%tw_app_package%</text>
+				<data name="tw_app_package"/>
+			</input>
+
+			<fill color="%accent_color%">
+				<placement x="%indent%" y="%row3a_y%" w="%content_width%" h="2"/>
+			</fill>
+
+			<!-- Touch Action Buttons -->
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row5_y%"/>
+				<text>Backup App + Data Archive</text>
+				<actions>
+					<action function="set">tw_back=app_manager</action>
+					<action function="set">tw_action=cmd</action>
+					<action function="set">tw_action_param=/system/bin/appmanager backup "%tw_app_package%"</action>
+					<action function="set">tw_text1=Backup Application &amp; Data?</action>
+					<action function="set">tw_text2=%tw_app_package%</action>
+					<action function="set">tw_action_text1=Archiving APK and user data...</action>
+					<action function="set">tw_complete_text1=App Backup Complete</action>
+					<action function="set">tw_slider_text=Swipe to Backup</action>
+					<action function="page">confirm_action</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row7_y%"/>
+				<text>Restore App + Data</text>
+				<actions>
+					<action function="set">tw_back=app_manager</action>
+					<action function="set">tw_action=cmd</action>
+					<action function="set">tw_action_param=/system/bin/appmanager restore "%tw_app_package%"</action>
+					<action function="set">tw_text1=Restore App &amp; Data?</action>
+					<action function="set">tw_text2=%tw_app_package%</action>
+					<action function="set">tw_action_text1=Restoring and applying permissions...</action>
+					<action function="set">tw_complete_text1=App Restore Complete</action>
+					<action function="set">tw_slider_text=Swipe to Restore</action>
+					<action function="page">confirm_action</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row9_y%"/>
+				<text>Freeze / Disable App</text>
+				<actions>
+					<action function="cmd">/system/bin/appmanager freeze "%tw_app_package%"</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row11_y%"/>
+				<text>Unfreeze / Enable App</text>
+				<actions>
+					<action function="cmd">/system/bin/appmanager unfreeze "%tw_app_package%"</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row13_y%"/>
+				<text>Wipe App Cache &amp; Data</text>
+				<actions>
+					<action function="cmd">/system/bin/appmanager clear "%tw_app_package%"</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row15_y%"/>
+				<text>List Installed Packages</text>
+				<actions>
+					<action function="cmd">/system/bin/appmanager list</action>
+				</actions>
+			</button>
+		</page>
+	</pages>
+</recovery>

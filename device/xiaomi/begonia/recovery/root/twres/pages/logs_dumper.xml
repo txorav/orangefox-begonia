@@ -1,0 +1,123 @@
+<?xml version="1.0"?>
+<recovery>
+	<pages>
+		<page name="logs_dumper">
+			<template name="page"/>
+
+			<text style="text_l">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>PoX Logs Dumper</text>
+			</text>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row4_header_y%"/>
+				<text>Diagnostic &amp; Forensic Logs</text>
+			</text>
+
+			<!-- Interactive Checkbox Toggles -->
+			<checkbox>
+				<placement x="%indent%" y="%row1a_y%"/>
+				<text>Kernel dmesg &amp; /sys/fs/pstore</text>
+				<data variable="tw_log_pstore"/>
+			</checkbox>
+
+			<checkbox>
+				<placement x="%indent%" y="%row2a_y%"/>
+				<text>Recovery Log &amp; /tmp/recovery.log</text>
+				<data variable="tw_log_recovery"/>
+			</checkbox>
+
+			<checkbox>
+				<placement x="%indent%" y="%row3a_y%"/>
+				<text>System Logcat &amp; Crash Dumps</text>
+				<data variable="tw_log_logcat"/>
+			</checkbox>
+
+			<checkbox>
+				<placement x="%indent%" y="%row4a_y%"/>
+				<text>Tombstones &amp; Crash Stacks</text>
+				<data variable="tw_log_tombstones"/>
+			</checkbox>
+
+			<checkbox>
+				<placement x="%indent%" y="%row5a_y%"/>
+				<text>Dropbox Reports &amp; ANRs</text>
+				<data variable="tw_log_dropbox"/>
+			</checkbox>
+
+			<checkbox>
+				<placement x="%indent%" y="%row6a_y%"/>
+				<text>Storage &amp; Partition Mounts</text>
+				<data variable="tw_log_mounts"/>
+			</checkbox>
+
+			<checkbox>
+				<placement x="%indent%" y="%row7a_y%"/>
+				<text>Battery &amp; MT6360 PMIC Stats</text>
+				<data variable="tw_log_hardware"/>
+			</checkbox>
+
+			<checkbox>
+				<placement x="%indent%" y="%row8a_y%"/>
+				<text>Root Modules (Magisk/KSU/APatch)</text>
+				<data variable="tw_log_root"/>
+			</checkbox>
+
+			<checkbox>
+				<placement x="%indent%" y="%row9a_y%"/>
+				<text>Wi-Fi Supplicant &amp; Network</text>
+				<data variable="tw_log_wifi"/>
+			</checkbox>
+
+			<!-- Quick Selection Buttons -->
+			<button style="button_third_width">
+				<placement x="%indent%" y="%row11_y%"/>
+				<text>Select All</text>
+				<actions>
+					<action function="set">tw_log_pstore=1</action>
+					<action function="set">tw_log_recovery=1</action>
+					<action function="set">tw_log_logcat=1</action>
+					<action function="set">tw_log_tombstones=1</action>
+					<action function="set">tw_log_dropbox=1</action>
+					<action function="set">tw_log_mounts=1</action>
+					<action function="set">tw_log_hardware=1</action>
+					<action function="set">tw_log_root=1</action>
+					<action function="set">tw_log_wifi=1</action>
+				</actions>
+			</button>
+
+			<button style="button_third_width">
+				<placement x="%center_x%" y="%row11_y%"/>
+				<text>Deselect All</text>
+				<actions>
+					<action function="set">tw_log_pstore=0</action>
+					<action function="set">tw_log_recovery=0</action>
+					<action function="set">tw_log_logcat=0</action>
+					<action function="set">tw_log_tombstones=0</action>
+					<action function="set">tw_log_dropbox=0</action>
+					<action function="set">tw_log_mounts=0</action>
+					<action function="set">tw_log_hardware=0</action>
+					<action function="set">tw_log_root=0</action>
+					<action function="set">tw_log_wifi=0</action>
+				</actions>
+			</button>
+
+			<!-- Action Trigger Button -->
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row13_y%"/>
+				<text>Dump Selected Logs Now</text>
+				<actions>
+					<action function="set">tw_back=logs_dumper</action>
+					<action function="set">tw_action=cmd</action>
+					<action function="set">tw_action_param=/system/bin/foxdump dump %tw_log_pstore% %tw_log_recovery% %tw_log_logcat% %tw_log_tombstones% %tw_log_dropbox% %tw_log_mounts% %tw_log_hardware% %tw_log_root% %tw_log_wifi%</action>
+					<action function="set">tw_text1=Dump Diagnostic Logs?</action>
+					<action function="set">tw_text2=Saves archive to /sdcard/Fox/Logs/</action>
+					<action function="set">tw_action_text1=Extracting &amp; compressing logs...</action>
+					<action function="set">tw_complete_text1=Log Dump Complete</action>
+					<action function="set">tw_slider_text=Swipe to Dump</action>
+					<action function="page">confirm_action</action>
+				</actions>
+			</button>
+		</page>
+	</pages>
+</recovery>

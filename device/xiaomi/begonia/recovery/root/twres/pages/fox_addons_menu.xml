@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<recovery>
+	<pages>
+		<page name="fox_addons_menu">
+			<template name="page"/>
+
+			<text style="text_l">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>Fox Addons &amp; Managers</text>
+			</text>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row4_header_y%"/>
+				<text>Begonia MT6785 Tools</text>
+			</text>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row2_y%"/>
+				<text>IMEI &amp; NVRAM Fixer</text>
+				<action function="page">imei_fixer</action>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row4_y%"/>
+				<text>PoX Logs Dumper</text>
+				<action function="page">logs_dumper</action>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row6_y%"/>
+				<text>Wi-Fi Network Manager</text>
+				<action function="page">wifi_manager</action>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row8_y%"/>
+				<text>Linux In-RAM Container</text>
+				<action function="page">container_manager</action>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row10_y%"/>
+				<text>App &amp; Data Manager</text>
+				<action function="page">app_manager</action>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row12_y%"/>
+				<text>Universal Root Manager</text>
+				<action function="page">root_manager</action>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row14_y%"/>
+				<text>Hardware Quick Controls</text>
+				<action function="page">hardware_controls</action>
+			</button>
+		</page>
+	</pages>
+</recovery>

@@ -1,0 +1,101 @@
+<?xml version="1.0"?>
+<recovery>
+	<pages>
+		<page name="imei_fixer">
+			<template name="page"/>
+
+			<text style="text_l">
+				<placement x="%col1_x_header%" y="%row3_header_y%"/>
+				<text>IMEI &amp; NVRAM Fixer</text>
+			</text>
+
+			<text style="text_m">
+				<placement x="%col1_x_header%" y="%row4_header_y%"/>
+				<text>MT6785 NVRAM / NVDATA</text>
+			</text>
+
+			<!-- SIM 1 IMEI Input -->
+			<text style="text_m_accent">
+				<placement x="%indent%" y="%row1a_y%"/>
+				<text>SIM 1 IMEI (15 digits):</text>
+			</text>
+
+			<input>
+				<placement x="%indent%" y="%row2_input_y%" w="%content_width%" h="%input_height%"/>
+				<text>%tw_imei_1%</text>
+				<data name="tw_imei_1"/>
+				<restrict minlen="14" maxlen="16" allow="0123456789"/>
+			</input>
+
+			<fill color="%accent_color%">
+				<placement x="%indent%" y="%row3a_y%" w="%content_width%" h="2"/>
+			</fill>
+
+			<!-- SIM 2 IMEI Input -->
+			<text style="text_m_accent">
+				<placement x="%indent%" y="%row4_y%"/>
+				<text>SIM 2 IMEI (15 digits):</text>
+			</text>
+
+			<input>
+				<placement x="%indent%" y="%row4_input_y%" w="%content_width%" h="%input_height%"/>
+				<text>%tw_imei_2%</text>
+				<data name="tw_imei_2"/>
+				<restrict minlen="14" maxlen="16" allow="0123456789"/>
+			</input>
+
+			<fill color="%accent_color%">
+				<placement x="%indent%" y="%row5a_y%" w="%content_width%" h="2"/>
+			</fill>
+
+			<!-- Touch Action Buttons -->
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row7_y%"/>
+				<text>Fetch from Device Hardware</text>
+				<actions>
+					<action function="cmd">/system/bin/foximei get</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row9_y%"/>
+				<text>Save config.txt to SDCard</text>
+				<actions>
+					<action function="cmd">/system/bin/foximei set %tw_imei_1% %tw_imei_2%</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row11_y%"/>
+				<text>Backup Current NVRAM</text>
+				<actions>
+					<action function="set">tw_back=imei_fixer</action>
+					<action function="set">tw_action=cmd</action>
+					<action function="set">tw_action_param=/system/bin/foximei backup</action>
+					<action function="set">tw_text1=Backup NVRAM Partitions?</action>
+					<action function="set">tw_text2=Dumps nvram, nvdata, and nvcfg</action>
+					<action function="set">tw_action_text1=Backing up NVRAM...</action>
+					<action function="set">tw_complete_text1=NVRAM Backup Complete</action>
+					<action function="set">tw_slider_text=Swipe to Backup</action>
+					<action function="page">confirm_action</action>
+				</actions>
+			</button>
+
+			<button style="main_button_half_height">
+				<placement x="%indent%" y="%row13_y%"/>
+				<text>Write &amp; Apply to NVRAM</text>
+				<actions>
+					<action function="set">tw_back=imei_fixer</action>
+					<action function="set">tw_action=cmd</action>
+					<action function="set">tw_action_param=/system/bin/foximei apply %tw_imei_1% %tw_imei_2%</action>
+					<action function="set">tw_text1=Write IMEIs to NVRAM?</action>
+					<action function="set">tw_text2=Permanently programs MP0H_000 and MP0H_001</action>
+					<action function="set">tw_action_text1=Flashing NVRAM BCD blocks...</action>
+					<action function="set">tw_complete_text1=NVRAM Update Complete</action>
+					<action function="set">tw_slider_text=Swipe to Apply</action>
+					<action function="page">confirm_action</action>
+				</actions>
+			</button>
+		</page>
+	</pages>
+</recovery>
