@@ -3867,6 +3867,9 @@
 				<listitem name="Fox Addons &amp; Begonia Managers">
 					<action function="page">fox_addons_menu</action>
 				</listitem>
+				<listitem name="Wi-Fi Network &amp; Internet">
+					<action function="page">wifi_manager</action>
+				</listitem>
 				<listitem name="{@change_twrp_folder_btn=Change TWRP folder}">
 					<condition var1="tw_is_decrypted" var2="1"/>
 					<action function="page">changeTwrpFolder</action>

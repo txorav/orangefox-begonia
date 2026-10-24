@@ -20,6 +20,16 @@ on init
     export LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw
     # Let the bundled curl validate HTTPS against the recovery CA bundle.
     export CURL_CA_BUNDLE /system/etc/security/cacert.pem
+    # DNS properties for Bionic libc resolver and domain mappings
+    setprop net.dns1 1.1.1.1
+    setprop net.dns2 8.8.8.8
+    setprop net.dns3 1.0.0.1
+    setprop net.dns4 8.8.4.4
+    setprop net.wlan0.dns1 1.1.1.1
+    setprop net.wlan0.dns2 8.8.8.8
+    symlink /system/etc/hosts /etc/hosts
+    symlink /system/etc/resolv.conf /etc/resolv.conf
+    symlink /system/etc/resolv.conf /tmp/resolv.conf
     start hwservicemanager
     start servicemanager
     # Auto-detect dynamic vs non-dynamic partition layout

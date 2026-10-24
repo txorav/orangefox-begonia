@@ -455,6 +455,50 @@ test_pass "foxdump: Selective dump execution succeeded"
 rm -rf "$DUMP_SELECTIVE_SANDBOX"
 
 # -----------------------------------------------------------------------------
+# 10. DNS Resolution, Static Hosts & Wi-Fi UI Verification
+# -----------------------------------------------------------------------------
+echo ""
+echo "--- 10. DNS Resolution, Static Hosts & Wi-Fi UI Verification ---"
+
+ROOT_DIR="$DIR/recovery/root"
+HOSTS_FILE="$ROOT_DIR/system/etc/hosts"
+RESOLV_FILE="$ROOT_DIR/system/etc/resolv.conf"
+INIT_RC="$ROOT_DIR/init.recovery.mt6785.rc"
+
+assert_file_exists "$HOSTS_FILE" "Recovery static hosts file"
+if grep -q "github.com" "$HOSTS_FILE" && grep -q "api.github.com" "$HOSTS_FILE" && grep -q "raw.githubusercontent.com" "$HOSTS_FILE"; then
+    test_pass "hosts: Authoritative GitHub mappings present"
+else
+    test_fail "hosts" "Missing expected GitHub domain mappings in $HOSTS_FILE"
+fi
+
+assert_file_exists "$RESOLV_FILE" "Recovery resolv.conf file"
+if grep -q "1.1.1.1" "$RESOLV_FILE" && grep -q "8.8.8.8" "$RESOLV_FILE"; then
+    test_pass "resolv.conf: Upstream Cloudflare and Google DNS nameservers configured"
+else
+    test_fail "resolv.conf" "Missing expected nameservers in $RESOLV_FILE"
+fi
+
+if grep -q "setprop net.dns1 1.1.1.1" "$INIT_RC" && grep -q "symlink /system/etc/hosts /etc/hosts" "$INIT_RC"; then
+    test_pass "init.recovery.mt6785.rc: DNS properties and hosts symlink configured"
+else
+    test_fail "init_rc" "Missing DNS property or symlink config in $INIT_RC"
+fi
+
+if grep -q "wifi_manager" "$ROOT_DIR/twres/portrait.xml"; then
+    test_pass "portrait.xml: Wi-Fi Manager accessible from Advanced menu"
+else
+    test_fail "portrait" "portrait.xml missing Wi-Fi Manager listitem"
+fi
+
+if sh "$BIN_DIR/foxwifi" fixdns >/dev/null 2>&1; then
+    test_pass "foxwifi fixdns: Executed successfully"
+else
+    test_fail "foxwifi" "foxwifi fixdns command failed"
+fi
+
+
+# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 echo ""

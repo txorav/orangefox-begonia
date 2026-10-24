@@ -1,0 +1,35 @@
+127.0.0.1       localhost
+::1             localhost ip6-localhost ip6-loopback
+
+# GitHub Official Core IPv4
+140.82.121.3    github.com
+140.82.121.4    github.com
+140.82.121.5    api.github.com
+140.82.121.6    api.github.com
+185.199.108.133 raw.githubusercontent.com
+185.199.109.133 raw.githubusercontent.com
+185.199.110.133 raw.githubusercontent.com
+185.199.111.133 raw.githubusercontent.com
+185.199.108.133 objects.githubusercontent.com
+185.199.109.133 objects.githubusercontent.com
+185.199.110.133 objects.githubusercontent.com
+185.199.111.133 objects.githubusercontent.com
+185.199.108.154 github-releases.githubusercontent.com
+185.199.109.154 github-releases.githubusercontent.com
+185.199.110.154 github-releases.githubusercontent.com
+185.199.111.154 github-releases.githubusercontent.com
+140.82.121.9    codeload.github.com
+140.82.121.10   codeload.github.com
+185.199.108.133 gist.githubusercontent.com
+185.199.109.133 gist.githubusercontent.com
+185.199.110.133 gist.githubusercontent.com
+185.199.111.133 gist.githubusercontent.com
+185.199.108.153 assets-cdn.github.com
+
+# GitLab & Mirrors
+172.65.251.78   gitlab.com
+185.166.142.21  bitbucket.org
+
+# Anycast Public DNS
+1.1.1.1         one.one.one.one
+8.8.8.8         dns.google

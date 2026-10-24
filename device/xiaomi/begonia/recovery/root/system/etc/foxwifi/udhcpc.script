@@ -24,10 +24,32 @@ case "$1" in
                 fi
             done
         fi
-        : > /etc/resolv.conf 2>/dev/null
+        {
+            for d in $dns; do
+                echo "nameserver $d"
+            done
+            echo "nameserver 1.1.1.1"
+            echo "nameserver 8.8.8.8"
+            echo "nameserver 1.0.0.1"
+            echo "nameserver 8.8.4.4"
+            echo "options timeout:2 attempts:3 rotate"
+        } > /system/etc/resolv.conf 2>/dev/null
+        cp -f /system/etc/resolv.conf /etc/resolv.conf 2>/dev/null || true
+        cp -f /system/etc/resolv.conf /tmp/resolv.conf 2>/dev/null || true
+
+        # Update Android system properties for Bionic libc getaddrinfo
+        idx=1
         for d in $dns; do
-            echo "nameserver $d" >> /etc/resolv.conf 2>/dev/null
+            setprop "net.dns$idx" "$d" 2>/dev/null || true
+            setprop "net.${interface}.dns$idx" "$d" 2>/dev/null || true
+            idx=$((idx + 1))
+            [ "$idx" -gt 2 ] && break
         done
+        [ "$idx" -le 1 ] && setprop net.dns1 1.1.1.1 2>/dev/null && setprop "net.${interface}.dns1" 1.1.1.1 2>/dev/null
+        [ "$idx" -le 2 ] && setprop net.dns2 8.8.8.8 2>/dev/null && setprop "net.${interface}.dns2" 8.8.8.8 2>/dev/null
+        setprop net.dns3 1.0.0.1 2>/dev/null || true
+        setprop net.dns4 8.8.4.4 2>/dev/null || true
+        setprop net.change.dns 1 2>/dev/null || true
         if [ -x /system/bin/foxadb ]; then
             /system/bin/foxadb on >/dev/null 2>&1
         else
