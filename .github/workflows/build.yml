@@ -257,17 +257,18 @@ jobs:
       - name: Package Fox Addons into OrangeFox Zip
         if: success()
         run: |
-          OUT_DIR="${{ env.SRC_DIR }}/out/target/product/begonia"
-          ADDONS_DIR="device/xiaomi/begonia/addons"
-          for z in "$OUT_DIR"/OrangeFox-*.zip; do
+          OUT_DIR="$(realpath "${{ env.SRC_DIR }}/out/target/product/begonia" 2>/dev/null || echo "$GITHUB_WORKSPACE/${{ env.SRC_DIR }}/out/target/product/begonia")"
+          ADDONS_DIR="$(realpath "device/xiaomi/begonia/addons" 2>/dev/null || echo "$GITHUB_WORKSPACE/device/xiaomi/begonia/addons")"
+          find "$OUT_DIR" -maxdepth 1 -name "*.zip" | while read -r z; do
             [ -f "$z" ] || continue
-            echo "Injecting Fox Addons into $z..."
+            abs_z="$(realpath "$z")"
+            echo "Injecting Fox Addons into $abs_z..."
             STAGE=$(mktemp -d)
             mkdir -p "$STAGE/sdcard/Fox/FoxFiles/FoxAddons"
-            cp -f "$ADDONS_DIR"/*.zip "$STAGE/sdcard/Fox/FoxFiles/FoxAddons/"
-            (cd "$STAGE" && zip -u "$z" sdcard/Fox/FoxFiles/FoxAddons/*.zip)
+            cp -f "$ADDONS_DIR"/*.zip "$STAGE/sdcard/Fox/FoxFiles/FoxAddons/" 2>/dev/null || true
+            (cd "$STAGE" && zip -u "$abs_z" sdcard/Fox/FoxFiles/FoxAddons/*.zip) || true
             rm -rf "$STAGE"
-            md5sum "$z" | awk '{print $1}' > "${z}.md5"
+            md5sum "$abs_z" | awk '{print $1}' > "${abs_z}.md5" 2>/dev/null || true
           done
 
       - name: Upload recovery artifacts
@@ -276,7 +277,8 @@ jobs:
         with:
           name: orangefox-begonia-recovery
           path: |
-            ${{ env.SRC_DIR }}/out/target/product/begonia/OrangeFox-*.zip
+            ${{ env.SRC_DIR }}/out/target/product/begonia/*.zip
+            ${{ env.SRC_DIR }}/out/target/product/begonia/*.md5
             ${{ env.SRC_DIR }}/out/target/product/begonia/recovery.img
           if-no-files-found: warn
 
@@ -285,7 +287,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ env.SRC_DIR }}/out/target/product/begonia/OrangeFox-*.zip
+            ${{ env.SRC_DIR }}/out/target/product/begonia/*.zip
+            ${{ env.SRC_DIR }}/out/target/product/begonia/*.md5
             ${{ env.SRC_DIR }}/out/target/product/begonia/recovery.img
           generate_release_notes: true
 
